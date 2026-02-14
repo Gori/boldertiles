@@ -60,6 +60,7 @@ final class ClaudeTileView: NSView, TileContentView, WKNavigationDelegate {
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         )
+
         webView.configuration.userContentController.addUserScript(errorScript)
 
         addSubview(webView)
@@ -79,8 +80,7 @@ final class ClaudeTileView: NSView, TileContentView, WKNavigationDelegate {
     private func insetContentFrame(_ rect: NSRect) -> NSRect {
         let m = TileType.claude.contentInsets
         return NSRect(
-            x: m.left,
-            y: m.bottom,
+            x: m.left, y: m.bottom,
             width: max(0, rect.width - m.left - m.right),
             height: max(0, rect.height - m.top - m.bottom)
         )

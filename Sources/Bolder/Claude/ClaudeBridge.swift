@@ -45,6 +45,14 @@ final class ClaudeBridge: NSObject, WKScriptMessageHandler {
             onMetaUpdate(meta)
             session.setAutoApprove(enabled)
 
+        case "set_model":
+            guard let model = body["model"] as? String else { return }
+            session.setModel(model)
+
+        case "add_allowed_tool":
+            guard let tool = body["tool"] as? String else { return }
+            session.addAllowedTool(tool)
+
         default:
             break
         }
@@ -54,6 +62,10 @@ final class ClaudeBridge: NSObject, WKScriptMessageHandler {
 
     /// Send an event to the web UI.
     func sendEvent(_ json: [String: Any]) {
+        #if DEBUG
+        if let eventType = json["type"] as? String { print("[ClaudeBridge] \(eventType)") }
+        #endif
+
         guard let data = try? JSONSerialization.data(withJSONObject: json),
               let jsonString = String(data: data, encoding: .utf8) else { return }
 

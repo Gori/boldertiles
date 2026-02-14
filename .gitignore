@@ -2,3 +2,4 @@
 .build/
 .bolder/
 Frameworks/
+claude-ui/node_modules/

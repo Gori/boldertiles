@@ -9,6 +9,7 @@ final class ProjectStore {
     private let notesDirURL: URL
     private let terminalDirURL: URL
     private let claudeDirURL: URL
+    private let featuresFileURL: URL
     private let writeQueue = DispatchQueue(label: "com.bolder.persistence", qos: .utility)
 
     init(projectURL: URL) {
@@ -19,6 +20,7 @@ final class ProjectStore {
         self.notesDirURL = bolderDirURL.appendingPathComponent("notes", isDirectory: true)
         self.terminalDirURL = bolderDirURL.appendingPathComponent("terminal", isDirectory: true)
         self.claudeDirURL = bolderDirURL.appendingPathComponent("claude", isDirectory: true)
+        self.featuresFileURL = bolderDirURL.appendingPathComponent("features.json")
     }
 
     /// Load the strip model from disk synchronously.
@@ -156,6 +158,34 @@ final class ProjectStore {
         let fileURL = claudeDirURL.appendingPathComponent("\(tileID.uuidString).json")
         writeQueue.async {
             try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
+
+    // MARK: - Features persistence
+
+    /// Load the features store from disk synchronously.
+    func loadFeatures() -> FeaturesStore {
+        guard FileManager.default.fileExists(atPath: featuresFileURL.path),
+              let data = try? Data(contentsOf: featuresFileURL),
+              let store = try? JSONDecoder().decode(FeaturesStore.self, from: data) else {
+            return FeaturesStore()
+        }
+        return store
+    }
+
+    /// Save the features store to disk asynchronously.
+    func saveFeatures(_ store: FeaturesStore) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(store) else { return }
+
+        writeQueue.async { [bolderDirURL, featuresFileURL] in
+            do {
+                try FileManager.default.createDirectory(at: bolderDirURL, withIntermediateDirectories: true)
+                try data.write(to: featuresFileURL, options: .atomic)
+            } catch {
+                print("Failed to save features: \(error)")
+            }
         }
     }
 }

@@ -10,10 +10,13 @@ final class ClaudeSession {
     private let projectURL: URL
     private var sessionID: String?
     private var autoApprove: Bool
+    private var model: String?
+    private var allowedTools: [String] = ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
 
     // Block tracking for streaming content blocks
     private var blockToolIds: [Int: String] = [:]
     private var pendingToolInput: [Int: String] = [:]
+    private var currentParentToolUseId: String?
 
     /// Called on main thread with each parsed JSON event from stdout.
     var onEvent: (([String: Any]) -> Void)?
@@ -48,8 +51,12 @@ final class ClaudeSession {
 
         if autoApprove {
             args.append("--dangerously-skip-permissions")
-        } else {
-            args += ["--allowedTools", "Read,Glob,Grep,WebSearch,WebFetch"]
+        } else if !allowedTools.isEmpty {
+            args += ["--allowedTools", allowedTools.joined(separator: ",")]
+        }
+
+        if let m = model {
+            args += ["--model", m]
         }
 
         if let sid = sessionID {
@@ -168,6 +175,21 @@ final class ClaudeSession {
         start()
     }
 
+    func setModel(_ name: String) {
+        model = name
+        intentionalRestart = true
+        tearDownProcess()
+        start()
+    }
+
+    func addAllowedTool(_ name: String) {
+        guard !autoApprove, !allowedTools.contains(name) else { return }
+        allowedTools.append(name)
+        intentionalRestart = true
+        tearDownProcess()
+        start()
+    }
+
     // MARK: - Private
 
     private var intentionalRestart = false
@@ -221,6 +243,7 @@ final class ClaudeSession {
         case "stream_event":
             guard let event = json["event"] as? [String: Any],
                   let eventType = event["type"] as? String else { return }
+            currentParentToolUseId = json["parent_tool_use_id"] as? String
             handleStreamEvent(eventType, event: event)
 
         case "user":
@@ -239,17 +262,32 @@ final class ClaudeSession {
     }
 
     private func handleSystem(_ json: [String: Any]) {
-        guard let subtype = json["subtype"] as? String, subtype == "init" else { return }
-        if let sid = json["session_id"] as? String {
-            sessionID = sid
-            onSessionID?(sid)
+        guard let subtype = json["subtype"] as? String else { return }
+
+        switch subtype {
+        case "init":
+            if let sid = json["session_id"] as? String {
+                sessionID = sid
+                onSessionID?(sid)
+            }
+            var initEvent: [String: Any] = [
+                "type": "init",
+                "sessionId": sessionID ?? "",
+                "autoApprove": autoApprove,
+                "model": json["model"] as? String ?? "unknown"
+            ]
+            if let tools = json["tools"] as? [String] { initEvent["tools"] = tools }
+            if let mcp = json["mcp_servers"] as? [String] { initEvent["mcpServers"] = mcp }
+            if let perm = json["permissionMode"] as? String { initEvent["permissionMode"] = perm }
+            if let cwd = json["cwd"] as? String { initEvent["cwd"] = cwd }
+            onEvent?(initEvent)
+
+        case "compact_boundary":
+            onEvent?(["type": "system_message", "text": "Context compacted"])
+
+        default:
+            break
         }
-        onEvent?([
-            "type": "init",
-            "sessionId": sessionID ?? "",
-            "autoApprove": autoApprove,
-            "model": json["model"] as? String ?? "unknown"
-        ])
     }
 
     private func handleStreamEvent(_ eventType: String, event: [String: Any]) {
@@ -265,19 +303,24 @@ final class ClaudeSession {
 
             switch blockType {
             case "text":
-                onEvent?(["type": "stream_start"])
+                var ev: [String: Any] = ["type": "stream_start"]
+                if let pid = currentParentToolUseId { ev["parentToolUseId"] = pid }
+                onEvent?(ev)
 
             case "thinking":
-                onEvent?(["type": "thinking_start"])
+                var ev: [String: Any] = ["type": "thinking_start"]
+                if let pid = currentParentToolUseId { ev["parentToolUseId"] = pid }
+                onEvent?(ev)
 
             case "tool_use", "server_tool_use":
                 let toolId = block["id"] as? String ?? ""
+                let toolName = block["name"] as? String ?? ""
                 blockToolIds[index] = toolId
                 pendingToolInput[index] = ""
                 onEvent?([
                     "type": "tool_use",
                     "id": toolId,
-                    "name": block["name"] as? String ?? "",
+                    "name": toolName,
                     "input": block["input"] ?? [:]
                 ])
 
@@ -314,6 +357,9 @@ final class ClaudeSession {
                     pendingToolInput[index, default: ""] += partial
                 }
 
+            case "signature_delta":
+                break
+
             default:
                 break
             }
@@ -327,6 +373,15 @@ final class ClaudeSession {
                 onEvent?(["type": "tool_input", "id": toolId, "input": parsed])
             }
 
+        case "message_delta", "message_stop", "ping":
+            break
+
+        case "error":
+            let msg = event["message"] as? String
+                ?? (event["error"] as? [String: Any])?["message"] as? String
+                ?? "Unknown stream error"
+            onEvent?(["type": "error", "message": msg])
+
         default:
             break
         }
@@ -337,11 +392,12 @@ final class ClaudeSession {
               let content = message["content"] as? [[String: Any]] else { return }
 
         for block in content where block["type"] as? String == "tool_result" {
+            let isError = block["is_error"] as? Bool ?? false
             onEvent?([
                 "type": "tool_result",
                 "toolUseId": block["tool_use_id"] as? String ?? "",
                 "content": extractText(from: block["content"]),
-                "isError": block["is_error"] as? Bool ?? false
+                "isError": isError
             ])
         }
     }

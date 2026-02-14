@@ -285,10 +285,13 @@ final class StripView: NSView {
         case .addNotesTile:    addTile(type: .notes)
         case .addTerminalTile: addTile(type: .terminal)
         case .addClaudeTile:   addTile(type: .claude)
+        case .addFeaturesTile: openOrCreateFeaturesTile()
         case .removeTile:      removeFocusedTile()
         case .toggleFullscreen: window?.toggleFullScreen(nil)
         case .fontSizeUp:      changeFontSize(delta: fontSizeStep)
         case .fontSizeDown:    changeFontSize(delta: -fontSizeStep)
+        case .refineNote:      refineCurrentNote()
+        case .saveAsFeature:   saveCurrentNoteAsFeature()
         }
     }
 
@@ -336,6 +339,9 @@ final class StripView: NSView {
     @objc func menuToggleFullscreen(_ sender: Any?) { perform(.toggleFullscreen) }
     @objc func menuFontSizeUp(_ sender: Any?)       { perform(.fontSizeUp) }
     @objc func menuFontSizeDown(_ sender: Any?)     { perform(.fontSizeDown) }
+    @objc func menuAddFeaturesTile(_ sender: Any?)   { perform(.addFeaturesTile) }
+    @objc func menuRefineNote(_ sender: Any?)        { perform(.refineNote) }
+    @objc func menuSaveAsFeature(_ sender: Any?)     { perform(.saveAsFeature) }
 
     private func navigateFocus(delta: Int) {
         let newIndex = model.focusedIndex + delta
@@ -433,7 +439,7 @@ final class StripView: NSView {
                 claudeView.terminateSession()
             }
             projectStore.deleteClaudeMeta(for: tile.id)
-        case .placeholder:
+        case .features, .placeholder:
             break
         }
 
@@ -471,7 +477,11 @@ final class StripView: NSView {
         switch tile.tileType {
         case .notes:
             if let notesView = view as? NotesTileView {
-                window?.makeFirstResponder(notesView.innerTextView)
+                if notesView.isRefineActive, let answerField = notesView.refineAnswerField {
+                    window?.makeFirstResponder(answerField)
+                } else {
+                    window?.makeFirstResponder(notesView.innerTextView)
+                }
             }
         case .terminal:
             if let terminalView = view as? TerminalTileView {
@@ -481,8 +491,50 @@ final class StripView: NSView {
             if let claudeView = view as? ClaudeTileView {
                 window?.makeFirstResponder(claudeView.innerWebView)
             }
-        case .placeholder:
+        case .features, .placeholder:
             window?.makeFirstResponder(self)
         }
+    }
+
+    // MARK: - Feature actions
+
+    private func refineCurrentNote() {
+        let index = model.focusedIndex
+        guard index >= 0, index < model.tiles.count,
+              model.tiles[index].tileType == .notes else { return }
+        guard let notesView = virtualizationEngine.view(for: model.tiles[index].id) as? NotesTileView else { return }
+        notesView.startRefine(projectURL: projectStore.projectURL)
+    }
+
+    private func saveCurrentNoteAsFeature() {
+        let index = model.focusedIndex
+        guard index >= 0, index < model.tiles.count,
+              model.tiles[index].tileType == .notes else { return }
+        guard let notesView = virtualizationEngine.view(for: model.tiles[index].id) as? NotesTileView else { return }
+
+        notesView.saveAsFeature(projectURL: projectStore.projectURL) { [weak self] feature in
+            guard let self, let feature else { return }
+            var store = self.projectStore.loadFeatures()
+            store.features.append(feature)
+            self.projectStore.saveFeatures(store)
+            self.openOrCreateFeaturesTile()
+        }
+    }
+
+    private func openOrCreateFeaturesTile() {
+        // Navigate to existing features tile if one exists
+        if let existingIndex = model.tiles.firstIndex(where: { $0.tileType == .features }) {
+            model.focusedIndex = existingIndex
+            // Reload the features view
+            if let featuresView = virtualizationEngine.view(for: model.tiles[existingIndex].id) as? FeaturesTileView {
+                featuresView.reloadFeatures()
+            }
+            scrollToFocused()
+            updateFirstResponder()
+            return
+        }
+
+        // Create a new features tile
+        addTile(type: .features)
     }
 }
