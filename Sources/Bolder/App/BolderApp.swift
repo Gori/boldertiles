@@ -106,7 +106,6 @@ final class BolderAppDelegate: NSObject, NSApplicationDelegate {
         tilesMenu.addItem(.separator())
         addShortcutItem(to: tilesMenu, action: .addNotesTile, selector: #selector(StripView.menuAddNotesTile(_:)))
         addShortcutItem(to: tilesMenu, action: .addTerminalTile, selector: #selector(StripView.menuAddTerminalTile(_:)))
-        addShortcutItem(to: tilesMenu, action: .addClaudeTile, selector: #selector(StripView.menuAddClaudeTile(_:)))
         addShortcutItem(to: tilesMenu, action: .addFeaturesTile, selector: #selector(StripView.menuAddFeaturesTile(_:)))
         tilesMenu.addItem(.separator())
         addShortcutItem(to: tilesMenu, action: .refineNote, selector: #selector(StripView.menuRefineNote(_:)))

@@ -21,8 +21,6 @@ final class DefaultTileViewFactory: TileViewFactory {
             return NotesTileView(frame: frame, projectStore: projectStore)
         case .terminal:
             return TerminalTileView(frame: frame)
-        case .claude:
-            return ClaudeTileView(frame: frame, projectStore: projectStore)
         case .features:
             return FeaturesTileView(frame: frame, projectStore: projectStore)
         }

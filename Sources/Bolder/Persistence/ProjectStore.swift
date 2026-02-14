@@ -8,7 +8,6 @@ final class ProjectStore {
     private let projectFileURL: URL
     private let notesDirURL: URL
     private let terminalDirURL: URL
-    private let claudeDirURL: URL
     private let featuresFileURL: URL
     private let writeQueue = DispatchQueue(label: "com.bolder.persistence", qos: .utility)
 
@@ -19,7 +18,6 @@ final class ProjectStore {
         self.projectFileURL = bolderDirURL.appendingPathComponent("project.json")
         self.notesDirURL = bolderDirURL.appendingPathComponent("notes", isDirectory: true)
         self.terminalDirURL = bolderDirURL.appendingPathComponent("terminal", isDirectory: true)
-        self.claudeDirURL = bolderDirURL.appendingPathComponent("claude", isDirectory: true)
         self.featuresFileURL = bolderDirURL.appendingPathComponent("features.json")
     }
 
@@ -124,38 +122,6 @@ final class ProjectStore {
     /// Delete terminal metadata for a tile.
     func deleteTerminalMeta(for tileID: UUID) {
         let fileURL = terminalDirURL.appendingPathComponent("\(tileID.uuidString).json")
-        writeQueue.async {
-            try? FileManager.default.removeItem(at: fileURL)
-        }
-    }
-
-    // MARK: - Claude metadata persistence
-
-    /// Load Claude metadata for a tile.
-    func loadClaudeMeta(for tileID: UUID) -> ClaudeMeta? {
-        let fileURL = claudeDirURL.appendingPathComponent("\(tileID.uuidString).json")
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
-        guard let data = try? Data(contentsOf: fileURL) else { return nil }
-        return try? JSONDecoder().decode(ClaudeMeta.self, from: data)
-    }
-
-    /// Save Claude metadata for a tile.
-    func saveClaudeMeta(_ meta: ClaudeMeta, for tileID: UUID) {
-        let fileURL = claudeDirURL.appendingPathComponent("\(tileID.uuidString).json")
-        writeQueue.async { [claudeDirURL] in
-            do {
-                try FileManager.default.createDirectory(at: claudeDirURL, withIntermediateDirectories: true)
-                let data = try JSONEncoder().encode(meta)
-                try data.write(to: fileURL, options: .atomic)
-            } catch {
-                print("Failed to save claude meta: \(error)")
-            }
-        }
-    }
-
-    /// Delete Claude metadata for a tile.
-    func deleteClaudeMeta(for tileID: UUID) {
-        let fileURL = claudeDirURL.appendingPathComponent("\(tileID.uuidString).json")
         writeQueue.async {
             try? FileManager.default.removeItem(at: fileURL)
         }

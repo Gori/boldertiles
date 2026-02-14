@@ -89,7 +89,7 @@ final class VirtualizationEngine {
             }
 
             // Terminal and Claude views keep their state alive — just detach from superview
-            if tileType == .terminal || tileType == .claude {
+            if tileType == .terminal {
                 view.removeFromSuperview()
             } else {
                 view.suspend()

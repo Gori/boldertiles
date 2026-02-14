@@ -9,16 +9,12 @@ let ghosttyKitAvailable = FileManager.default.fileExists(
     atPath: "\(packageDir)/Frameworks/GhosttyKit.xcframework/Info.plist"
 )
 
-let claudeUIAvailable = FileManager.default.fileExists(
-    atPath: "\(packageDir)/Sources/Bolder/Resources/ClaudeUI/index.html"
-)
-
 var targets: [Target] = [
     .executableTarget(
         name: "Bolder",
         dependencies: ghosttyKitAvailable ? ["GhosttyKit"] : [],
         path: "Sources/Bolder",
-        resources: claudeUIAvailable ? [.copy("Resources/ClaudeUI")] : [],
+        resources: [],
         swiftSettings: ghosttyKitAvailable ? [.define("GHOSTTY_AVAILABLE")] : [],
         linkerSettings: ghosttyKitAvailable ? [
             .linkedFramework("Metal"),

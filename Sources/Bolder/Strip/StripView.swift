@@ -284,7 +284,6 @@ final class StripView: NSView {
         case .toggleFullWidth: toggleFullWidth()
         case .addNotesTile:    addTile(type: .notes)
         case .addTerminalTile: addTile(type: .terminal)
-        case .addClaudeTile:   addTile(type: .claude)
         case .addFeaturesTile: openOrCreateFeaturesTile()
         case .removeTile:      removeFocusedTile()
         case .toggleFullscreen: window?.toggleFullScreen(nil)
@@ -334,7 +333,6 @@ final class StripView: NSView {
     @objc func menuToggleFullWidth(_ sender: Any?)  { perform(.toggleFullWidth) }
     @objc func menuAddNotesTile(_ sender: Any?)     { perform(.addNotesTile) }
     @objc func menuAddTerminalTile(_ sender: Any?)  { perform(.addTerminalTile) }
-    @objc func menuAddClaudeTile(_ sender: Any?)    { perform(.addClaudeTile) }
     @objc func menuRemoveTile(_ sender: Any?)       { perform(.removeTile) }
     @objc func menuToggleFullscreen(_ sender: Any?) { perform(.toggleFullscreen) }
     @objc func menuFontSizeUp(_ sender: Any?)       { perform(.fontSizeUp) }
@@ -434,11 +432,6 @@ final class StripView: NSView {
         case .terminal:
             TerminalSessionManager.shared.markInactive(tile.id)
             projectStore.deleteTerminalMeta(for: tile.id)
-        case .claude:
-            if let claudeView = virtualizationEngine.view(for: tile.id) as? ClaudeTileView {
-                claudeView.terminateSession()
-            }
-            projectStore.deleteClaudeMeta(for: tile.id)
         case .features, .placeholder:
             break
         }
@@ -486,10 +479,6 @@ final class StripView: NSView {
         case .terminal:
             if let terminalView = view as? TerminalTileView {
                 window?.makeFirstResponder(terminalView.innerSurfaceView)
-            }
-        case .claude:
-            if let claudeView = view as? ClaudeTileView {
-                window?.makeFirstResponder(claudeView.innerWebView)
             }
         case .features, .placeholder:
             window?.makeFirstResponder(self)

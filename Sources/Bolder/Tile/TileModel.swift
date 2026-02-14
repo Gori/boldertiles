@@ -23,7 +23,6 @@ struct TileModel: Codable, Identifiable, Equatable, Sendable {
         switch type {
         case .notes:       return 20
         case .terminal:    return 16
-        case .claude:      return 16
         case .features:    return 16
         case .placeholder: return 16
         }
@@ -34,7 +33,6 @@ enum TileType: String, Codable, Sendable {
     case placeholder
     case notes
     case terminal
-    case claude
     case features
 
     /// Content margins (top, left, bottom, right) for each tile type.
@@ -42,7 +40,6 @@ enum TileType: String, Codable, Sendable {
         switch self {
         case .notes:       return NSEdgeInsets(top: 28, left: 28, bottom: 28, right: 28)
         case .terminal:    return NSEdgeInsets(top: 28, left: 28, bottom: 28, right: 28)
-        case .claude:      return .init()
         case .features:    return NSEdgeInsets(top: 28, left: 28, bottom: 28, right: 28)
         case .placeholder: return NSEdgeInsets(top: 28, left: 28, bottom: 28, right: 28)
         }

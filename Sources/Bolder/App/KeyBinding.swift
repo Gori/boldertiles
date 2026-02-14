@@ -11,7 +11,6 @@ enum ShortcutAction: String, CaseIterable, Codable {
     case toggleFullWidth
     case addNotesTile
     case addTerminalTile
-    case addClaudeTile
     case removeTile
     case toggleFullscreen
     case fontSizeUp
@@ -31,7 +30,6 @@ enum ShortcutAction: String, CaseIterable, Codable {
         case .toggleFullWidth: return "Toggle Full/Half"
         case .addNotesTile:    return "Add Notes Tile"
         case .addTerminalTile: return "Add Terminal Tile"
-        case .addClaudeTile:   return "Add Claude Tile"
         case .removeTile:      return "Remove Tile"
         case .toggleFullscreen: return "Toggle Fullscreen"
         case .fontSizeUp:      return "Increase Font Size"
@@ -52,7 +50,6 @@ enum ShortcutAction: String, CaseIterable, Codable {
         .toggleFullWidth: KeyBinding(key: "h", option: true),
         .addNotesTile:    KeyBinding(key: "n", command: true, shift: true),
         .addTerminalTile: KeyBinding(key: "t", command: true),
-        .addClaudeTile:   KeyBinding(key: "n", command: true),
         .removeTile:      KeyBinding(key: "w", command: true),
         .toggleFullscreen: KeyBinding(key: "f", command: true),
         .fontSizeUp:      KeyBinding(key: "=", command: true),
