@@ -1,41 +1,41 @@
 import AppKit
+import WebKit
 
-/// NSScrollView subclass that only handles vertical scrolling.
-/// Horizontal scroll gestures pass through to the superview (StripView)
-/// so strip-level trackpad scrolling works over notes tiles.
-private final class VerticalScrollView: NSScrollView {
-    override func scrollWheel(with event: NSEvent) {
-        // If the gesture is primarily horizontal, forward to the strip
-        if abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
-            nextResponder?.scrollWheel(with: event)
-            return
-        }
-        super.scrollWheel(with: event)
-    }
-}
-
-/// A tile containing a plain-text/Markdown editor using NSTextView (TextKit 2).
-final class NotesTileView: NSView, TileContentView, NSTextViewDelegate {
+/// A tile containing a Markdown editor using WKWebView (React + CodeMirror 6).
+final class NotesTileView: NSView, TileContentView {
     private static let backgroundColor = NSColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1.0)
 
-    private let scrollView = VerticalScrollView()
-    private let textView = NSTextView()
+    private let notesWebView: NotesWebView
     private let debugOverlay = TileDebugOverlay()
     private let projectStore: ProjectStore
+    private weak var marinationEngine: MarinationEngine?
+    private let statusIndicator = NoteStatusIndicator(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     private var tileID: UUID?
+    private var currentPhase: MarinationPhase = .ingest
     private var saveWorkItem: DispatchWorkItem?
     private let saveDebounce: TimeInterval = 0.3
     private var isDirty = false
-    private var refineSession: RefineSession?
-    private var refineOverlay: RefineOverlayView?
     private var featureExtractor: FeatureExtractor?
+    private var cachedContent: String = ""
+    private var hasPendingSuggestions = false
+    private var webViewReady = false
+    private var pendingContent: String?
+    private var pendingSuggestions: [Suggestion]?
 
-    init(frame frameRect: NSRect, projectStore: ProjectStore) {
+    init(frame frameRect: NSRect, projectStore: ProjectStore, marinationEngine: MarinationEngine? = nil) {
         self.projectStore = projectStore
+        self.marinationEngine = marinationEngine
+        self.notesWebView = NotesWebView(frame: CGRect(origin: .zero, size: frameRect.size))
         super.init(frame: frameRect)
         wantsLayer = true
-        setupTextView()
+        layer?.backgroundColor = Self.backgroundColor.cgColor
+        setupWebView()
+        setupStatusIndicator()
+        setupContextMenu()
+        setupNotificationObservers()
         debugOverlay.install(in: self)
+
+        notesWebView.loadUI()
     }
 
     @available(*, unavailable)
@@ -43,95 +43,277 @@ final class NotesTileView: NSView, TileContentView, NSTextViewDelegate {
         fatalError("init(coder:) not supported")
     }
 
-    private func setupTextView() {
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.autoresizingMask = [.width, .height]
-        scrollView.drawsBackground = true
-        scrollView.backgroundColor = Self.backgroundColor
-        scrollView.borderType = .noBorder
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
 
-        textView.isEditable = true
-        textView.isSelectable = true
-        textView.allowsUndo = true
-        textView.isRichText = false
-        textView.usesFindPanel = true
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.autoresizingMask = [.width]
-        let insets = TileType.notes.contentInsets
-        textView.textContainerInset = NSSize(width: insets.left, height: insets.top)
-        textView.backgroundColor = Self.backgroundColor
-        textView.insertionPointColor = NSColor(red: 0.8, green: 0.8, blue: 0.8, alpha: 1.0)
-        textView.font = FontLoader.jetBrainsMono(size: 20)
-        textView.textColor = NSColor(red: 0.85, green: 0.85, blue: 0.85, alpha: 1.0)
-        textView.delegate = self
+    private func setupWebView() {
+        notesWebView.autoresizingMask = [.width, .height]
+        notesWebView.frame = bounds
+        addSubview(notesWebView)
 
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.containerSize = NSSize(
-            width: 0, // will be set by widthTracksTextView
-            height: CGFloat.greatestFiniteMagnitude
+        notesWebView.onAction = { [weak self] action in
+            self?.handleBridgeAction(action)
+        }
+    }
+
+    private func setupStatusIndicator() {
+        statusIndicator.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(statusIndicator)
+
+        NSLayoutConstraint.activate([
+            statusIndicator.centerXAnchor.constraint(equalTo: centerXAnchor),
+            statusIndicator.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            statusIndicator.widthAnchor.constraint(equalToConstant: 80),
+            statusIndicator.heightAnchor.constraint(equalToConstant: 20),
+        ])
+    }
+
+    private func setupContextMenu() {
+        notesWebView.extraMenuItems = [
+            NSMenuItem(title: "Start Marinating", action: #selector(contextToggleMarination), keyEquivalent: ""),
+            NSMenuItem(title: "Save as Feature", action: #selector(contextSaveAsFeature), keyEquivalent: ""),
+        ]
+        // Set targets so the responder chain finds us
+        for item in notesWebView.extraMenuItems {
+            item.target = self
+        }
+    }
+
+    private func setupNotificationObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleStatusChanged(_:)),
+            name: .marinationStatusChanged,
+            object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSuggestionsUpdated(_:)),
+            name: .marinationSuggestionsUpdated,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePhaseChanged(_:)),
+            name: .marinationPhaseChanged,
+            object: nil
+        )
+    }
 
-        scrollView.documentView = textView
-        scrollView.frame = bounds
-        addSubview(scrollView)
+    // MARK: - Bridge action handling
 
-        // Context menu
-        let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Refine with Claude", action: #selector(contextRefine), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Save as Feature", action: #selector(contextSaveAsFeature), keyEquivalent: ""))
-        textView.menu = menu
+    private func handleBridgeAction(_ action: NotesBridge.BridgeAction) {
+        print("[NotesTileView] handleBridgeAction: \(action)")
+        switch action {
+        case .contentChanged(let text):
+            cachedContent = text
+            isDirty = true
+            scheduleSave()
+            if let tileID {
+                marinationEngine?.noteDidEdit(tileID)
+            }
+
+        case .suggestionAccepted(let id):
+            guard let tileID else { return }
+            marinationEngine?.acceptSuggestion(id, for: tileID)
+            notesWebView.removeSuggestion(id: id)
+            updateHasPendingSuggestions()
+            isDirty = true
+            scheduleSave()
+
+        case .suggestionRejected(let id):
+            guard let tileID else { return }
+            marinationEngine?.rejectSuggestion(id, for: tileID)
+            notesWebView.removeSuggestion(id: id)
+            updateHasPendingSuggestions()
+
+        case .choiceSelected(let id, let index):
+            guard let tileID else { return }
+            // Insert the chosen text — the bridge will send a contentChanged after
+            if let state = projectStore.loadMarinationState(for: tileID),
+               let suggestion = state.suggestions.first(where: { $0.id == id }),
+               case .question(_, let choices) = suggestion.content,
+               index >= 0, index < choices.count {
+                marinationEngine?.acceptSuggestion(id, for: tileID)
+            }
+            notesWebView.removeSuggestion(id: id)
+            updateHasPendingSuggestions()
+
+        case .response(let id, _):
+            guard let tileID else { return }
+            marinationEngine?.acceptSuggestion(id, for: tileID)
+            notesWebView.removeSuggestion(id: id)
+            updateHasPendingSuggestions()
+
+        case .keyCommand(let key):
+            handleKeyCommand(key)
+
+        case .ready:
+            print("[NotesTileView] ready! pendingContent=\(pendingContent?.count ?? -1), pendingSuggestions=\(pendingSuggestions?.count ?? -1)")
+            webViewReady = true
+            // Flush any content/suggestions that arrived before the web view loaded
+            if let content = pendingContent {
+                print("[NotesTileView] flushing pendingContent (\(content.count) chars)")
+                notesWebView.setContent(content)
+                pendingContent = nil
+            }
+            if let suggestions = pendingSuggestions {
+                print("[NotesTileView] flushing pendingSuggestions (\(suggestions.count))")
+                notesWebView.displaySuggestions(suggestions)
+                pendingSuggestions = nil
+            }
+        }
+    }
+
+    private func handleKeyCommand(_ key: String) {
+        guard hasPendingSuggestions, let tileID else { return }
+        guard let state = projectStore.loadMarinationState(for: tileID) else { return }
+        let pending = state.suggestions.filter { $0.state == .pending }
+        guard let topSuggestion = pending.first else { return }
+
+        switch key {
+        case "tab":
+            marinationEngine?.acceptSuggestion(topSuggestion.id, for: tileID)
+            notesWebView.removeSuggestion(id: topSuggestion.id)
+            updateHasPendingSuggestions()
+            isDirty = true
+            scheduleSave()
+        case "escape":
+            marinationEngine?.rejectSuggestion(topSuggestion.id, for: tileID)
+            notesWebView.removeSuggestion(id: topSuggestion.id)
+            updateHasPendingSuggestions()
+        default:
+            break
+        }
+    }
+
+    private func updateHasPendingSuggestions() {
+        guard let tileID else {
+            hasPendingSuggestions = false
+            return
+        }
+        if let state = projectStore.loadMarinationState(for: tileID) {
+            hasPendingSuggestions = state.suggestions.contains { $0.state == .pending }
+        } else {
+            hasPendingSuggestions = false
+        }
+    }
+
+    // MARK: - Notification handlers
+
+    @objc private func handleStatusChanged(_ notification: Notification) {
+        guard let noteID = notification.userInfo?["noteID"] as? UUID,
+              noteID == tileID,
+              let statusRaw = notification.userInfo?["status"] as? String,
+              let status = NoteStatus(rawValue: statusRaw) else { return }
+        let phase = notification.userInfo?["phase"] as? MarinationPhase ?? currentPhase
+        currentPhase = phase
+        statusIndicator.update(status: status, phase: phase)
+    }
+
+    @objc private func handlePhaseChanged(_ notification: Notification) {
+        guard let noteID = notification.userInfo?["noteID"] as? UUID,
+              noteID == tileID,
+              let phaseRaw = notification.userInfo?["phase"] as? String,
+              let phase = MarinationPhase(rawValue: phaseRaw) else { return }
+        currentPhase = phase
+        let status: NoteStatus = statusIndicator.isHidden ? .idle : .active
+        statusIndicator.update(status: status, phase: phase)
+    }
+
+    @objc private func handleSuggestionsUpdated(_ notification: Notification) {
+        guard let noteID = notification.userInfo?["noteID"] as? UUID,
+              noteID == tileID else { return }
+
+        let suggestions: [Suggestion]
+        if let s = notification.userInfo?["suggestions"] as? [Suggestion] {
+            suggestions = s
+        } else if let state = projectStore.loadMarinationState(for: noteID) {
+            suggestions = state.suggestions
+        } else {
+            return
+        }
+
+        let pending = suggestions.filter { $0.state == .pending }
+        hasPendingSuggestions = !pending.isEmpty
+        print("[NotesTileView] Received \(suggestions.count) suggestions (\(pending.count) pending) for tile \(noteID)")
+
+        if webViewReady {
+            notesWebView.displaySuggestions(suggestions)
+        } else {
+            pendingSuggestions = suggestions
+        }
     }
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
-        scrollView.frame = bounds
+        notesWebView.frame = bounds
     }
 
     // MARK: - TileContentView
 
     func configure(with tile: TileModel) {
         tileID = tile.id
-        let content = projectStore.loadNoteContent(for: tile.id)
-        let scrollPosition = scrollView.contentView.bounds.origin
-        textView.string = content ?? ""
-        scrollView.contentView.scroll(to: scrollPosition)
-        scrollView.reflectScrolledClipView(scrollView.contentView)
+        currentPhase = tile.marinationPhase
+        let content = projectStore.loadNoteContent(for: tile.id) ?? ""
+        cachedContent = content
         isDirty = false
+        statusIndicator.update(status: tile.noteStatus, phase: tile.marinationPhase)
         debugOverlay.setLines(["notes"])
+        print("[NotesTileView] configure: tile=\(tile.id), webViewReady=\(webViewReady), content=\(content.count) chars")
+
+        if webViewReady {
+            notesWebView.setContent(content)
+            notesWebView.clearSuggestions()
+        } else {
+            pendingContent = content
+            print("[NotesTileView] configure: queued pendingContent (\(content.count) chars)")
+        }
+
+        // Re-display pending suggestions from marination state
+        if let state = projectStore.loadMarinationState(for: tile.id) {
+            let pending = state.suggestions.filter { $0.state == .pending }
+            hasPendingSuggestions = !pending.isEmpty
+            if !pending.isEmpty {
+                if webViewReady {
+                    notesWebView.displaySuggestions(state.suggestions)
+                } else {
+                    pendingSuggestions = state.suggestions
+                }
+            }
+        }
     }
 
     func activate() {
-        textView.isEditable = true
+        notesWebView.setEditable(true)
     }
 
     func throttle() {
-        textView.isEditable = true
+        notesWebView.setEditable(true)
     }
 
     func suspend() {
         flushPendingSave()
-        textView.isEditable = false
+        notesWebView.setEditable(false)
     }
 
     func resetForReuse() {
         flushPendingSave()
-        textView.string = ""
-        textView.undoManager?.removeAllActions()
+        if webViewReady {
+            notesWebView.setContent("")
+            notesWebView.clearSuggestions()
+        }
         tileID = nil
+        currentPhase = .ingest
         isDirty = false
+        hasPendingSuggestions = false
+        cachedContent = ""
+        statusIndicator.update(status: .idle, phase: .ingest)
     }
 
     func setFontSize(_ size: CGFloat) {
-        textView.font = FontLoader.jetBrainsMono(size: size)
-    }
-
-    // MARK: - NSTextViewDelegate
-
-    func textDidChange(_ notification: Notification) {
-        isDirty = true
-        scheduleSave()
+        notesWebView.setFontSize(size)
     }
 
     // MARK: - Debounced save
@@ -157,101 +339,41 @@ final class NotesTileView: NSView, TileContentView, NSTextViewDelegate {
             print("[NotesTileView] Warning: attempted save with no tileID")
             return
         }
-        let content = textView.string
-        projectStore.saveNoteContent(content, for: tileID)
+        projectStore.saveNoteContent(cachedContent, for: tileID)
         isDirty = false
     }
 
-    /// The inner text view, for first-responder routing.
-    var innerTextView: NSTextView { textView }
+    /// The inner web view, for first-responder routing.
+    var innerWebView: WKWebView { notesWebView.webView }
 
-    /// Whether a refine overlay is active and needs input focus.
-    var isRefineActive: Bool { refineOverlay != nil }
+    // MARK: - Marination
 
-    /// The overlay's answer field, for first-responder routing during refine.
-    var refineAnswerField: NSTextView? {
-        guard let overlay = refineOverlay, overlay.isWaitingForInput else { return nil }
-        return overlay.answerField
+    func toggleMarination() {
+        guard let tileID else { return }
+        guard let engine = marinationEngine else { return }
+
+        if statusIndicator.isHidden {
+            engine.activateNote(tileID)
+        } else {
+            engine.deactivateNote(tileID)
+        }
     }
 
     // MARK: - Context menu actions
 
-    @objc private func contextRefine(_ sender: Any?) {
-        startRefine(projectURL: projectStore.projectURL)
+    @objc private func contextToggleMarination(_ sender: Any?) {
+        toggleMarination()
     }
 
     @objc private func contextSaveAsFeature(_ sender: Any?) {
         saveAsFeature(projectURL: projectStore.projectURL, completion: nil)
     }
 
-    // MARK: - Refine
-
-    func startRefine(projectURL: URL) {
-        guard refineSession == nil else { return }
-        let noteText = textView.string
-        guard !noteText.isEmpty else { return }
-
-        let session = RefineSession(projectURL: projectURL)
-        self.refineSession = session
-
-        let overlay = RefineOverlayView(frame: bounds)
-        overlay.autoresizingMask = [.width, .height]
-        self.refineOverlay = overlay
-        addSubview(overlay)
-
-        overlay.onCancel = { [weak self] in
-            self?.dismissRefine()
-        }
-
-        overlay.onReject = { [weak self] in
-            self?.dismissRefine()
-        }
-
-        overlay.onAccept = { [weak self] refinedText in
-            self?.textView.string = refinedText
-            self?.isDirty = true
-            self?.scheduleSave()
-            self?.dismissRefine()
-        }
-
-        overlay.onSubmitAnswers = { [weak self] answers in
-            guard let self else { return }
-            self.refineSession?.submitAnswers(answers, originalNoteText: noteText)
-        }
-
-        session.onStateChange = { [weak self, weak overlay] state in
-            guard let overlay else { return }
-            switch state {
-            case .idle, .askingQuestions:
-                break
-            case .waitingForAnswers(let questions):
-                overlay.showQuestions(questions)
-            case .refining:
-                overlay.showRefining(streamingText: self?.refineSession?.streamingText ?? "")
-            case .complete(let refinedText):
-                overlay.showComplete(refinedText: refinedText)
-            case .failed(let msg):
-                print("[NotesTileView] Refine failed: \(msg)")
-                self?.dismissRefine()
-            }
-        }
-
-        session.start(noteText: noteText)
-    }
-
-    private func dismissRefine() {
-        refineSession?.cancel()
-        refineSession = nil
-        refineOverlay?.removeFromSuperview()
-        refineOverlay = nil
-        window?.makeFirstResponder(textView)
-    }
-
     // MARK: - Save as Feature
 
     func saveAsFeature(projectURL: URL, completion: ((Feature?) -> Void)?) {
         guard featureExtractor == nil else { return }
-        let noteText = textView.string
+        let noteText = cachedContent
         guard !noteText.isEmpty, let noteID = tileID else {
             completion?(nil)
             return
@@ -266,5 +388,21 @@ final class NotesTileView: NSView, TileContentView, NSTextViewDelegate {
         }
 
         extractor.extract(noteText: noteText, noteID: noteID)
+    }
+
+    // MARK: - Key handling for suggestions
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if hasPendingSuggestions {
+            if event.keyCode == KeyBinding.specialKeyCodes["tab"]! {
+                handleKeyCommand("tab")
+                return true
+            }
+            if event.keyCode == KeyBinding.specialKeyCodes["escape"]! {
+                handleKeyCommand("escape")
+                return true
+            }
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }

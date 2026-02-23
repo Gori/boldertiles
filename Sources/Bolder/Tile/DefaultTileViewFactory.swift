@@ -8,9 +8,11 @@ protocol TileViewFactory {
 /// Default factory creating the appropriate view for each tile type.
 final class DefaultTileViewFactory: TileViewFactory {
     private let projectStore: ProjectStore
+    private weak var marinationEngine: MarinationEngine?
 
-    init(projectStore: ProjectStore) {
+    init(projectStore: ProjectStore, marinationEngine: MarinationEngine? = nil) {
         self.projectStore = projectStore
+        self.marinationEngine = marinationEngine
     }
 
     func makeView(for type: TileType, frame: NSRect) -> NSView & TileContentView {
@@ -18,9 +20,11 @@ final class DefaultTileViewFactory: TileViewFactory {
         case .placeholder:
             return PlaceholderTileView(frame: frame)
         case .notes:
-            return NotesTileView(frame: frame, projectStore: projectStore)
+            return NotesTileView(frame: frame, projectStore: projectStore, marinationEngine: marinationEngine)
         case .terminal:
             return TerminalTileView(frame: frame)
+        case .claude:
+            return ClaudeTileView(frame: frame, projectStore: projectStore)
         case .features:
             return FeaturesTileView(frame: frame, projectStore: projectStore)
         }

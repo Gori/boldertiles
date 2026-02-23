@@ -1,5 +1,13 @@
 import Foundation
 
+/// Protocol for marination state persistence, enabling test mocking.
+protocol MarinationStorage {
+    func loadMarinationState(for tileID: UUID) -> MarinationState?
+    func saveMarinationState(_ state: MarinationState, for tileID: UUID)
+    func deleteMarinationState(for tileID: UUID)
+    func loadNoteContent(for tileID: UUID) -> String?
+}
+
 /// Reads and writes tile state to `.bolder/tiles.json` within a project directory.
 final class ProjectStore {
     let projectURL: URL
@@ -9,6 +17,7 @@ final class ProjectStore {
     private let notesDirURL: URL
     private let terminalDirURL: URL
     private let featuresFileURL: URL
+    private let marinationDirURL: URL
     private let writeQueue = DispatchQueue(label: "com.bolder.persistence", qos: .utility)
 
     init(projectURL: URL) {
@@ -19,6 +28,7 @@ final class ProjectStore {
         self.notesDirURL = bolderDirURL.appendingPathComponent("notes", isDirectory: true)
         self.terminalDirURL = bolderDirURL.appendingPathComponent("terminal", isDirectory: true)
         self.featuresFileURL = bolderDirURL.appendingPathComponent("features.json")
+        self.marinationDirURL = bolderDirURL.appendingPathComponent("marination", isDirectory: true)
     }
 
     /// Load the strip model from disk synchronously.
@@ -154,7 +164,51 @@ final class ProjectStore {
             }
         }
     }
+
+    // MARK: - Marination persistence
+
+    /// Load marination state for a note tile (synchronous).
+    func loadMarinationState(for tileID: UUID) -> MarinationState? {
+        let fileURL = marinationDirURL.appendingPathComponent("\(tileID.uuidString).json")
+        guard FileManager.default.fileExists(atPath: fileURL.path),
+              let data = try? Data(contentsOf: fileURL) else { return nil }
+        return try? JSONDecoder().decode(MarinationState.self, from: data)
+    }
+
+    /// Save marination state for a note tile (async on write queue). Caps history at limit.
+    func saveMarinationState(_ state: MarinationState, for tileID: UUID) {
+        var cappedState = state
+        if cappedState.history.count > MarinationState.maxHistoryEntries {
+            cappedState.history = Array(cappedState.history.suffix(MarinationState.maxHistoryEntries))
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(cappedState) else { return }
+
+        let fileURL = marinationDirURL.appendingPathComponent("\(tileID.uuidString).json")
+        writeQueue.async { [marinationDirURL] in
+            do {
+                try FileManager.default.createDirectory(at: marinationDirURL, withIntermediateDirectories: true)
+                try data.write(to: fileURL, options: .atomic)
+            } catch {
+                print("Failed to save marination state: \(error)")
+            }
+        }
+    }
+
+    /// Delete marination state for a note tile (async on write queue).
+    func deleteMarinationState(for tileID: UUID) {
+        let fileURL = marinationDirURL.appendingPathComponent("\(tileID.uuidString).json")
+        writeQueue.async {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
 }
+
+// MARK: - MarinationStorage conformance
+
+extension ProjectStore: MarinationStorage {}
 
 private struct ProjectMeta: Codable {
     let version: Int

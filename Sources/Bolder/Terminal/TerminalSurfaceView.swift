@@ -25,7 +25,7 @@ final class TerminalSurfaceView: NSView {
 
     #if GHOSTTY_AVAILABLE
     /// Create and attach a Ghostty surface to this view.
-    func createSurface(workingDirectory: String?) {
+    func createSurface(workingDirectory: String?, command: String? = nil) {
         guard let app = GhosttyBridge.shared.app else { return }
         guard surface == nil else { return }
 
@@ -40,14 +40,31 @@ final class TerminalSurfaceView: NSView {
         config.scale_factor = Double(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0)
         config.font_size = 0 // use default from config
 
-        if let cwd = workingDirectory {
-            cwd.withCString { ptr in
-                config.working_directory = ptr
+        // Helper to create the surface once config is fully set
+        let createWithConfig: () -> Void = {
+            if let cwd = workingDirectory {
+                cwd.withCString { ptr in
+                    config.working_directory = ptr
+                    if let cmd = command {
+                        cmd.withCString { cmdPtr in
+                            config.command = cmdPtr
+                            self.surface = ghostty_surface_new(app, &config)
+                        }
+                    } else {
+                        self.surface = ghostty_surface_new(app, &config)
+                    }
+                }
+            } else if let cmd = command {
+                cmd.withCString { cmdPtr in
+                    config.command = cmdPtr
+                    self.surface = ghostty_surface_new(app, &config)
+                }
+            } else {
                 self.surface = ghostty_surface_new(app, &config)
             }
-        } else {
-            surface = ghostty_surface_new(app, &config)
         }
+
+        createWithConfig()
 
         if let surface {
             // Set initial size

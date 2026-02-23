@@ -15,9 +15,11 @@ enum ShortcutAction: String, CaseIterable, Codable {
     case toggleFullscreen
     case fontSizeUp
     case fontSizeDown
+    case addClaudeTile
     case addFeaturesTile
     case refineNote
     case saveAsFeature
+    case toggleMarination
 
     var displayName: String {
         switch self {
@@ -34,9 +36,11 @@ enum ShortcutAction: String, CaseIterable, Codable {
         case .toggleFullscreen: return "Toggle Fullscreen"
         case .fontSizeUp:      return "Increase Font Size"
         case .fontSizeDown:    return "Decrease Font Size"
+        case .addClaudeTile:   return "Add Claude Tile"
         case .addFeaturesTile: return "Add Features Tile"
-        case .refineNote:      return "Refine with Claude"
-        case .saveAsFeature:   return "Save as Feature"
+        case .refineNote:        return "Refine with Claude"
+        case .saveAsFeature:     return "Save as Feature"
+        case .toggleMarination:  return "Toggle Marination"
         }
     }
 
@@ -54,9 +58,11 @@ enum ShortcutAction: String, CaseIterable, Codable {
         .toggleFullscreen: KeyBinding(key: "f", command: true),
         .fontSizeUp:      KeyBinding(key: "=", command: true),
         .fontSizeDown:    KeyBinding(key: "-", command: true),
+        .addClaudeTile:   KeyBinding(key: "n", command: true),
         .addFeaturesTile: KeyBinding(key: "f", command: true, shift: true),
-        .refineNote:      KeyBinding(key: "r", command: true, shift: true),
-        .saveAsFeature:   KeyBinding(key: "s", command: true, shift: true),
+        .refineNote:        KeyBinding(key: "r", command: true, shift: true),
+        .saveAsFeature:     KeyBinding(key: "s", command: true, shift: true),
+        .toggleMarination:  KeyBinding(key: "m", command: true, shift: true),
     ]
 }
 

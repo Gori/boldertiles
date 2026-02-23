@@ -1,7 +1,15 @@
 import Foundation
 
+/// Protocol for Claude session interaction, enabling test mocking.
+protocol ClaudeSessionProviding: AnyObject {
+    func start()
+    func sendPrompt(_ text: String, images: [String]?)
+    func terminate()
+    var onEvent: (([String: Any]) -> Void)? { get set }
+}
+
 /// Manages a long-running `claude` process with bidirectional NDJSON streaming.
-final class ClaudeSession {
+final class ClaudeSession: ClaudeSessionProviding {
     private var process: Process?
     private var stdinPipe: Pipe?
     private var stdoutPipe: Pipe?

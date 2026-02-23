@@ -14,7 +14,7 @@ var targets: [Target] = [
         name: "Bolder",
         dependencies: ghosttyKitAvailable ? ["GhosttyKit"] : [],
         path: "Sources/Bolder",
-        resources: [],
+        resources: [.copy("Resources/NotesUI")],
         swiftSettings: ghosttyKitAvailable ? [.define("GHOSTTY_AVAILABLE")] : [],
         linkerSettings: ghosttyKitAvailable ? [
             .linkedFramework("Metal"),

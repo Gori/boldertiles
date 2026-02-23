@@ -9,6 +9,7 @@ final class StripView: NSView {
     private let virtualizationEngine: VirtualizationEngine
     private let projectStore: ProjectStore
     private let frameMetrics = FrameMetrics()
+    private weak var marinationEngine: MarinationEngine?
 
     // Tile container layers keyed by tile ID
     private var tileLayers: [UUID: CALayer] = [:]
@@ -21,11 +22,19 @@ final class StripView: NSView {
     private var swipeAccumulator: CGFloat = 0
     private var swipeCommitted = false
 
-    init(model: StripModel, projectStore: ProjectStore) {
+    // Vertical swipe state for Features tile overlay
+    private var verticalSwipeAccumulator: CGFloat = 0
+    private var isShowingFeatures = false
+    private var featuresView: FeaturesTileView?
+    private let verticalSnapAnimator = SnapAnimator()
+    private var verticalOffset: CGFloat = 0
+
+    init(model: StripModel, projectStore: ProjectStore, marinationEngine: MarinationEngine? = nil) {
         self.model = model
         self.projectStore = projectStore
+        self.marinationEngine = marinationEngine
         self.resizeController = ResizeController(model: model)
-        let factory = DefaultTileViewFactory(projectStore: projectStore)
+        let factory = DefaultTileViewFactory(projectStore: projectStore, marinationEngine: marinationEngine)
         self.virtualizationEngine = VirtualizationEngine(poolSize: 7, factory: factory)
 
         super.init(frame: .zero)
@@ -34,6 +43,8 @@ final class StripView: NSView {
 
         setupFocusLayer()
         setupSnapAnimator()
+        setupFeaturesOverlay()
+        setupVerticalAnimator()
     }
 
     required init?(coder: NSCoder) {
@@ -62,6 +73,28 @@ final class StripView: NSView {
         }
     }
 
+    private func setupFeaturesOverlay() {
+        let fv = FeaturesTileView(frame: .zero, projectStore: projectStore)
+        fv.isHidden = true
+        addSubview(fv)
+        self.featuresView = fv
+    }
+
+    private func setupVerticalAnimator() {
+        verticalSnapAnimator.onUpdate = { [weak self] offset in
+            guard let self else { return }
+            self.verticalOffset = offset
+            self.applyVerticalOffset()
+        }
+        verticalSnapAnimator.onComplete = { [weak self] in
+            guard let self else { return }
+            if self.verticalOffset == 0 {
+                self.featuresView?.isHidden = true
+                self.isShowingFeatures = false
+            }
+        }
+    }
+
     // MARK: - Layout
 
     override func layout() {
@@ -76,8 +109,11 @@ final class StripView: NSView {
             let maxOffset = StripLayout.maxScrollOffset(tiles: model.tiles, viewportWidth: bounds.width)
             model.scrollOffset = min(target, maxOffset)
         }
+        // Position features view above the viewport
+        featuresView?.frame = NSRect(x: 0, y: -bounds.height, width: bounds.width, height: bounds.height)
         updateLayout()
         updateTrackingArea()
+        applyVerticalOffset()
     }
 
     private func updateLayout() {
@@ -173,15 +209,33 @@ final class StripView: NSView {
 
         if event.phase == .began {
             swipeAccumulator = 0
+            verticalSwipeAccumulator = 0
             swipeCommitted = false
         } else if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
             swipeAccumulator = 0
+            verticalSwipeAccumulator = 0
             swipeCommitted = false
             return
         }
 
         guard event.phase == .changed, !swipeCommitted else { return }
 
+        // Detect primarily-vertical gestures for features overlay
+        let isVertical = abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) * 1.5
+        if isVertical {
+            verticalSwipeAccumulator += event.scrollingDeltaY
+
+            if verticalSwipeAccumulator > swipeThreshold && !isShowingFeatures {
+                swipeCommitted = true
+                showFeatures()
+            } else if verticalSwipeAccumulator < -swipeThreshold && isShowingFeatures {
+                swipeCommitted = true
+                hideFeatures()
+            }
+            return
+        }
+
+        // Horizontal swipe (existing behavior)
         swipeAccumulator -= event.scrollingDeltaX
 
         if swipeAccumulator > swipeThreshold {
@@ -284,13 +338,15 @@ final class StripView: NSView {
         case .toggleFullWidth: toggleFullWidth()
         case .addNotesTile:    addTile(type: .notes)
         case .addTerminalTile: addTile(type: .terminal)
+        case .addClaudeTile:   addTile(type: .claude)
         case .addFeaturesTile: openOrCreateFeaturesTile()
         case .removeTile:      removeFocusedTile()
         case .toggleFullscreen: window?.toggleFullScreen(nil)
         case .fontSizeUp:      changeFontSize(delta: fontSizeStep)
         case .fontSizeDown:    changeFontSize(delta: -fontSizeStep)
-        case .refineNote:      refineCurrentNote()
-        case .saveAsFeature:   saveCurrentNoteAsFeature()
+        case .refineNote:        break // Replaced by marination system
+        case .saveAsFeature:     saveCurrentNoteAsFeature()
+        case .toggleMarination:  toggleCurrentNoteMarination()
         }
     }
 
@@ -337,9 +393,10 @@ final class StripView: NSView {
     @objc func menuToggleFullscreen(_ sender: Any?) { perform(.toggleFullscreen) }
     @objc func menuFontSizeUp(_ sender: Any?)       { perform(.fontSizeUp) }
     @objc func menuFontSizeDown(_ sender: Any?)     { perform(.fontSizeDown) }
+    @objc func menuAddClaudeTile(_ sender: Any?)      { perform(.addClaudeTile) }
     @objc func menuAddFeaturesTile(_ sender: Any?)   { perform(.addFeaturesTile) }
-    @objc func menuRefineNote(_ sender: Any?)        { perform(.refineNote) }
-    @objc func menuSaveAsFeature(_ sender: Any?)     { perform(.saveAsFeature) }
+    @objc func menuSaveAsFeature(_ sender: Any?)       { perform(.saveAsFeature) }
+    @objc func menuToggleMarination(_ sender: Any?)    { perform(.toggleMarination) }
 
     private func navigateFocus(delta: Int) {
         let newIndex = model.focusedIndex + delta
@@ -388,6 +445,42 @@ final class StripView: NSView {
         snapAnimator.animate(from: model.scrollOffset, to: clamped)
     }
 
+    // MARK: - Vertical Features Overlay
+
+    private func applyVerticalOffset() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        // Shift all tile layers and content views down by verticalOffset
+        for (_, tileLayer) in tileLayers {
+            tileLayer.transform = CATransform3DMakeTranslation(0, verticalOffset, 0)
+        }
+        // Shift content views
+        for subview in subviews where subview !== featuresView {
+            subview.layer?.transform = CATransform3DMakeTranslation(0, verticalOffset, 0)
+        }
+        // Position features view: starts at -bounds.height, slides down with offset
+        featuresView?.frame = NSRect(
+            x: 0,
+            y: -bounds.height + verticalOffset,
+            width: bounds.width,
+            height: bounds.height
+        )
+        CATransaction.commit()
+    }
+
+    private func showFeatures() {
+        guard !isShowingFeatures else { return }
+        isShowingFeatures = true
+        featuresView?.isHidden = false
+        featuresView?.reloadFeatures()
+        verticalSnapAnimator.animate(from: verticalOffset, to: bounds.height)
+    }
+
+    private func hideFeatures() {
+        guard isShowingFeatures else { return }
+        verticalSnapAnimator.animate(from: verticalOffset, to: 0)
+    }
+
     // MARK: - Tile management
 
     /// Add a new tile of the given type after the focused tile.
@@ -429,7 +522,7 @@ final class StripView: NSView {
         switch tile.tileType {
         case .notes:
             projectStore.deleteNoteContent(for: tile.id)
-        case .terminal:
+        case .terminal, .claude:
             TerminalSessionManager.shared.markInactive(tile.id)
             projectStore.deleteTerminalMeta(for: tile.id)
         case .features, .placeholder:
@@ -470,15 +563,15 @@ final class StripView: NSView {
         switch tile.tileType {
         case .notes:
             if let notesView = view as? NotesTileView {
-                if notesView.isRefineActive, let answerField = notesView.refineAnswerField {
-                    window?.makeFirstResponder(answerField)
-                } else {
-                    window?.makeFirstResponder(notesView.innerTextView)
-                }
+                window?.makeFirstResponder(notesView.innerWebView)
             }
         case .terminal:
             if let terminalView = view as? TerminalTileView {
                 window?.makeFirstResponder(terminalView.innerSurfaceView)
+            }
+        case .claude:
+            if let claudeView = view as? ClaudeTileView {
+                window?.makeFirstResponder(claudeView.innerSurfaceView)
             }
         case .features, .placeholder:
             window?.makeFirstResponder(self)
@@ -487,12 +580,12 @@ final class StripView: NSView {
 
     // MARK: - Feature actions
 
-    private func refineCurrentNote() {
+    private func toggleCurrentNoteMarination() {
         let index = model.focusedIndex
         guard index >= 0, index < model.tiles.count,
               model.tiles[index].tileType == .notes else { return }
         guard let notesView = virtualizationEngine.view(for: model.tiles[index].id) as? NotesTileView else { return }
-        notesView.startRefine(projectURL: projectStore.projectURL)
+        notesView.toggleMarination()
     }
 
     private func saveCurrentNoteAsFeature() {

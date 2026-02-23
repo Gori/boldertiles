@@ -6,6 +6,7 @@ final class BolderAppDelegate: NSObject, NSApplicationDelegate {
     private var projectStore: ProjectStore?
     private var settingsWindow: SettingsWindow?
     private var projectURL: URL!
+    private var marinationEngine: MarinationEngine?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -38,11 +39,57 @@ final class BolderAppDelegate: NSObject, NSApplicationDelegate {
             self.stripModel = StripModel.defaultModel()
         }
 
+        // Create marination engine
+        let engine = MarinationEngine(storage: store, projectURL: projectURL)
+        self.marinationEngine = engine
+
+        // Wire engine to model
+        engine.getTiles = { [weak self] in
+            self?.stripModel.tiles ?? []
+        }
+        engine.onPromote = { [weak self] title, description, sourceNoteID in
+            guard let self, let store = self.projectStore else { return }
+            let feature = Feature(title: title, description: description, sourceNoteID: sourceNoteID)
+            var featuresStore = store.loadFeatures()
+            featuresStore.features.append(feature)
+            store.saveFeatures(featuresStore)
+            NotificationCenter.default.post(name: .init("featuresDidChange"), object: nil)
+        }
+
+        engine.onStatusChanged = { [weak self] noteID, status in
+            guard let self else { return }
+            if let index = self.stripModel.tiles.firstIndex(where: { $0.id == noteID }) {
+                self.stripModel.tiles[index].noteStatus = status
+                self.projectStore?.save(self.stripModel)
+                let phase = self.stripModel.tiles[index].marinationPhase
+                NotificationCenter.default.post(
+                    name: .marinationStatusChanged,
+                    object: nil,
+                    userInfo: ["noteID": noteID, "status": status.rawValue, "phase": phase]
+                )
+            }
+        }
+
+        engine.onPhaseChanged = { [weak self] noteID, phase in
+            guard let self else { return }
+            if let index = self.stripModel.tiles.firstIndex(where: { $0.id == noteID }) {
+                self.stripModel.tiles[index].marinationPhase = phase
+                self.projectStore?.save(self.stripModel)
+                NotificationCenter.default.post(
+                    name: .marinationPhaseChanged,
+                    object: nil,
+                    userInfo: ["noteID": noteID, "phase": phase.rawValue]
+                )
+            }
+        }
+
         buildMainMenu()
 
-        let window = MainWindow(stripModel: stripModel, projectStore: store)
+        let window = MainWindow(stripModel: stripModel, projectStore: store, marinationEngine: engine)
         window.makeKeyAndOrderFront(nil)
         self.mainWindow = window
+
+        engine.start()
 
         NSApp.activate(ignoringOtherApps: true)
 
@@ -60,6 +107,7 @@ final class BolderAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        marinationEngine?.stop()
         if let store = projectStore {
             store.save(stripModel)
         }
@@ -106,9 +154,10 @@ final class BolderAppDelegate: NSObject, NSApplicationDelegate {
         tilesMenu.addItem(.separator())
         addShortcutItem(to: tilesMenu, action: .addNotesTile, selector: #selector(StripView.menuAddNotesTile(_:)))
         addShortcutItem(to: tilesMenu, action: .addTerminalTile, selector: #selector(StripView.menuAddTerminalTile(_:)))
+        addShortcutItem(to: tilesMenu, action: .addClaudeTile, selector: #selector(StripView.menuAddClaudeTile(_:)))
         addShortcutItem(to: tilesMenu, action: .addFeaturesTile, selector: #selector(StripView.menuAddFeaturesTile(_:)))
         tilesMenu.addItem(.separator())
-        addShortcutItem(to: tilesMenu, action: .refineNote, selector: #selector(StripView.menuRefineNote(_:)))
+        addShortcutItem(to: tilesMenu, action: .toggleMarination, selector: #selector(StripView.menuToggleMarination(_:)))
         addShortcutItem(to: tilesMenu, action: .saveAsFeature, selector: #selector(StripView.menuSaveAsFeature(_:)))
         tilesMenu.addItem(.separator())
         addShortcutItem(to: tilesMenu, action: .removeTile, selector: #selector(StripView.menuRemoveTile(_:)))

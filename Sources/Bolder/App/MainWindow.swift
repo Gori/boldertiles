@@ -3,12 +3,12 @@ import AppKit
 final class MainWindow: NSWindow {
     private let stripView: StripView
 
-    init(stripModel: StripModel, projectStore: ProjectStore) {
+    init(stripModel: StripModel, projectStore: ProjectStore, marinationEngine: MarinationEngine? = nil) {
         guard let screen = NSScreen.main else {
             fatalError("No screen available")
         }
 
-        let stripView = StripView(model: stripModel, projectStore: projectStore)
+        let stripView = StripView(model: stripModel, projectStore: projectStore, marinationEngine: marinationEngine)
         self.stripView = stripView
 
         super.init(

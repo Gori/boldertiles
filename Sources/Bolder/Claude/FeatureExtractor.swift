@@ -1,11 +1,11 @@
 import Foundation
 
 /// A headless 1-turn Claude session that extracts a structured Feature from note text.
+/// Uses HeadlessClaudeRequest for the heavy lifting.
 final class FeatureExtractor {
     var onComplete: ((Feature?) -> Void)?
 
-    private var session: ClaudeSession?
-    private var accumulatedText = ""
+    private var request: HeadlessClaudeRequest?
     private let projectURL: URL
 
     init(projectURL: URL) {
@@ -18,16 +18,6 @@ final class FeatureExtractor {
 
     /// Extract a Feature from the given note text.
     func extract(noteText: String, noteID: UUID) {
-        accumulatedText = ""
-        let session = ClaudeSession(sessionID: nil, autoApprove: false, projectURL: projectURL)
-        self.session = session
-
-        session.onEvent = { [weak self] event in
-            self?.handleEvent(event, noteID: noteID)
-        }
-
-        session.start()
-
         let prompt = """
         Convert the following note into a structured feature. Return ONLY valid JSON with these fields:
         - "title": a concise title (max ~60 chars)
@@ -41,62 +31,32 @@ final class FeatureExtractor {
         --- END NOTE ---
         """
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            session.sendPrompt(prompt)
+        let request = HeadlessClaudeRequest(projectURL: projectURL)
+        self.request = request
+
+        request.send(prompt: prompt, expectJSON: true) { [weak self] result in
+            guard let self else { return }
+            self.request = nil
+
+            switch result {
+            case .json(let json):
+                let feature = self.parseFeature(from: json, noteID: noteID)
+                self.onComplete?(feature)
+            case .text, .error:
+                self.onComplete?(nil)
+            }
         }
     }
 
     func cancel() {
-        session?.terminate()
-        session = nil
+        request?.cancel()
+        request = nil
     }
 
-    // MARK: - Event handling
-
-    private func handleEvent(_ event: [String: Any], noteID: UUID) {
-        guard let type = event["type"] as? String else { return }
-
-        switch type {
-        case "text_delta":
-            if let text = event["text"] as? String {
-                accumulatedText += text
-            }
-
-        case "turn_complete":
-            let feature = parseFeature(from: accumulatedText, noteID: noteID)
-            session?.terminate()
-            session = nil
-            onComplete?(feature)
-
-        case "error":
-            print("[FeatureExtractor] Error: \(event["message"] as? String ?? "unknown")")
-            session?.terminate()
-            session = nil
-            onComplete?(nil)
-
-        default:
-            break
-        }
-    }
-
-    private func parseFeature(from text: String, noteID: UUID) -> Feature? {
-        // Strip markdown fences defensively
-        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleaned.hasPrefix("```json") {
-            cleaned = String(cleaned.dropFirst(7))
-        } else if cleaned.hasPrefix("```") {
-            cleaned = String(cleaned.dropFirst(3))
-        }
-        if cleaned.hasSuffix("```") {
-            cleaned = String(cleaned.dropLast(3))
-        }
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let data = cleaned.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let title = json["title"] as? String,
+    private func parseFeature(from json: [String: Any], noteID: UUID) -> Feature? {
+        guard let title = json["title"] as? String,
               let description = json["description"] as? String else {
-            print("[FeatureExtractor] Failed to parse JSON from: \(text.prefix(200))")
+            print("[FeatureExtractor] Missing required fields in JSON")
             return nil
         }
 
