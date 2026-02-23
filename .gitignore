@@ -2,3 +2,4 @@
 .build/
 .bolder/
 Frameworks/
+node_modules/
