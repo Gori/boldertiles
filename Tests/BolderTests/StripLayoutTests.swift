@@ -7,7 +7,7 @@ final class StripLayoutTests: XCTestCase {
 
     func testEmptyTilesProducesNoFrames() {
         let frames = StripLayout.layout(
-            tiles: [],
+            tiles: [TileModel](),
             viewportSize: CGSize(width: 1920, height: 1080),
             scrollOffset: 0
         )

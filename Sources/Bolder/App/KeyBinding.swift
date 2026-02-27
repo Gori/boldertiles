@@ -9,17 +9,17 @@ enum ShortcutAction: String, CaseIterable, Codable {
     case shrinkTile
     case growTile
     case toggleFullWidth
-    case addNotesTile
+    case addIdea
     case addTerminalTile
     case removeTile
     case toggleFullscreen
     case fontSizeUp
     case fontSizeDown
-    case addClaudeTile
-    case addFeaturesTile
-    case refineNote
-    case saveAsFeature
     case toggleMarination
+    case switchToStrip
+    case switchToBuild
+    case switchToKanban
+    case advancePhase
 
     var displayName: String {
         switch self {
@@ -30,17 +30,17 @@ enum ShortcutAction: String, CaseIterable, Codable {
         case .shrinkTile:      return "Shrink Tile"
         case .growTile:        return "Grow Tile"
         case .toggleFullWidth: return "Toggle Full/Half"
-        case .addNotesTile:    return "Add Notes Tile"
+        case .addIdea:         return "Add Idea"
         case .addTerminalTile: return "Add Terminal Tile"
         case .removeTile:      return "Remove Tile"
         case .toggleFullscreen: return "Toggle Fullscreen"
         case .fontSizeUp:      return "Increase Font Size"
         case .fontSizeDown:    return "Decrease Font Size"
-        case .addClaudeTile:   return "Add Claude Tile"
-        case .addFeaturesTile: return "Add Features Tile"
-        case .refineNote:        return "Refine with Claude"
-        case .saveAsFeature:     return "Save as Feature"
-        case .toggleMarination:  return "Toggle Marination"
+        case .toggleMarination: return "Toggle Marination"
+        case .switchToStrip:   return "Strip Mode"
+        case .switchToBuild:   return "Build Mode"
+        case .switchToKanban:  return "Kanban Mode"
+        case .advancePhase:    return "Advance Phase"
         }
     }
 
@@ -52,17 +52,17 @@ enum ShortcutAction: String, CaseIterable, Codable {
         .shrinkTile:      KeyBinding(key: "-", option: true),
         .growTile:        KeyBinding(key: "=", option: true),
         .toggleFullWidth: KeyBinding(key: "h", option: true),
-        .addNotesTile:    KeyBinding(key: "n", command: true, shift: true),
+        .addIdea:         KeyBinding(key: "n", command: true),
         .addTerminalTile: KeyBinding(key: "t", command: true),
         .removeTile:      KeyBinding(key: "w", command: true),
         .toggleFullscreen: KeyBinding(key: "f", command: true),
         .fontSizeUp:      KeyBinding(key: "=", command: true),
         .fontSizeDown:    KeyBinding(key: "-", command: true),
-        .addClaudeTile:   KeyBinding(key: "n", command: true),
-        .addFeaturesTile: KeyBinding(key: "f", command: true, shift: true),
-        .refineNote:        KeyBinding(key: "r", command: true, shift: true),
-        .saveAsFeature:     KeyBinding(key: "s", command: true, shift: true),
-        .toggleMarination:  KeyBinding(key: "m", command: true, shift: true),
+        .toggleMarination: KeyBinding(key: "m", command: true, shift: true),
+        .switchToStrip:   KeyBinding(key: "1", command: true),
+        .switchToBuild:   KeyBinding(key: "2", command: true),
+        .switchToKanban:  KeyBinding(key: "3", command: true),
+        .advancePhase:    KeyBinding(key: "right", command: true, shift: true),
     ]
 }
 

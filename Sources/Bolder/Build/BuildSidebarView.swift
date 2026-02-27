@@ -1,0 +1,106 @@
+import AppKit
+
+/// Scrollable sidebar listing all Build-phase ideas.
+final class BuildSidebarView: NSView {
+    private let scrollView = NSScrollView()
+    private let stackView = NSStackView()
+    private let headerLabel = NSTextField(labelWithString: "BUILD")
+
+    var onSelectIdea: ((UUID) -> Void)?
+    private var itemViews: [BuildSidebarItem] = []
+    private var selectedIdeaID: UUID?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = CGColor(red: 0.06, green: 0.06, blue: 0.08, alpha: 1.0)
+
+        setupHeader()
+        setupScrollView()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not supported")
+    }
+
+    private func setupHeader() {
+        headerLabel.font = NSFont.systemFont(ofSize: 10, weight: .bold)
+        headerLabel.textColor = NSColor.white.withAlphaComponent(0.35)
+        headerLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(headerLabel)
+
+        NSLayoutConstraint.activate([
+            headerLabel.topAnchor.constraint(equalTo: topAnchor, constant: 16),
+            headerLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+        ])
+    }
+
+    private func setupScrollView() {
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+
+        stackView.orientation = .vertical
+        stackView.alignment = .leading
+        stackView.spacing = 2
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+
+        let clipView = NSClipView()
+        clipView.drawsBackground = false
+        clipView.documentView = stackView
+        scrollView.contentView = clipView
+
+        addSubview(scrollView)
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 12),
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+
+            stackView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: clipView.topAnchor),
+        ])
+    }
+
+    /// Reload the sidebar with the given ideas.
+    func reload(ideas: [IdeaModel], noteContentLoader: (UUID) -> String?, selectedID: UUID?) {
+        // Remove old items
+        for item in itemViews {
+            stackView.removeArrangedSubview(item)
+            item.removeFromSuperview()
+        }
+        itemViews.removeAll()
+
+        self.selectedIdeaID = selectedID
+
+        for idea in ideas {
+            let item = BuildSidebarItem(frame: NSRect(x: 0, y: 0, width: 234, height: 52))
+            item.translatesAutoresizingMaskIntoConstraints = false
+            item.configure(idea: idea, notePreview: noteContentLoader(idea.id))
+            item.setSelected(idea.id == selectedID)
+            item.onClick = { [weak self] id in
+                self?.selectIdea(id)
+            }
+
+            stackView.addArrangedSubview(item)
+            NSLayoutConstraint.activate([
+                item.widthAnchor.constraint(equalTo: stackView.widthAnchor),
+                item.heightAnchor.constraint(equalToConstant: 52),
+            ])
+            itemViews.append(item)
+        }
+    }
+
+    private func selectIdea(_ id: UUID) {
+        selectedIdeaID = id
+        for item in itemViews {
+            item.setSelected(item.ideaID == id)
+        }
+        onSelectIdea?(id)
+    }
+}

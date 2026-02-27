@@ -7,20 +7,26 @@ struct TileFrame: Equatable {
     let frame: CGRect
 }
 
-/// Pure function: given tiles, viewport size, and scroll offset, produce pixel-snapped tile frames.
+/// Protocol for items that can be laid out in the strip.
+protocol Layoutable {
+    var id: UUID { get }
+    var widthSpec: WidthSpec { get }
+}
+
+/// TileModel conforms for backward compatibility.
+extension TileModel: Layoutable {}
+
+/// StripItem conforms for the new workspace model.
+extension StripItem: Layoutable {}
+
+/// Pure function: given layoutable items, viewport size, and scroll offset, produce pixel-snapped tile frames.
 enum StripLayout {
     static let tileGap: CGFloat = 0.0
     static let tileMargin: CGFloat = 4.0
 
     /// Compute tile frames for the strip.
-    /// - Parameters:
-    ///   - tiles: The tile models.
-    ///   - viewportSize: The visible viewport size (width x height).
-    ///   - scrollOffset: Current horizontal scroll offset (positive = scrolled right).
-    ///   - scale: Display scale factor for pixel snapping.
-    /// - Returns: Array of TileFrames in order.
-    static func layout(
-        tiles: [TileModel],
+    static func layout<T: Layoutable>(
+        tiles: [T],
         viewportSize: CGSize,
         scrollOffset: CGFloat,
         scale: CGFloat = 2.0
@@ -43,9 +49,9 @@ enum StripLayout {
         return frames
     }
 
-    /// Total content width for all tiles.
-    static func totalContentWidth(
-        tiles: [TileModel],
+    /// Total content width for all items.
+    static func totalContentWidth<T: Layoutable>(
+        tiles: [T],
         viewportWidth: CGFloat
     ) -> CGFloat {
         guard !tiles.isEmpty else { return 0 }
@@ -53,10 +59,10 @@ enum StripLayout {
         return widths.reduce(0, +) + CGFloat(tiles.count - 1) * tileGap
     }
 
-    /// The scroll offset that left-aligns the tile at the given index.
-    static func snapOffset(
+    /// The scroll offset that left-aligns the item at the given index.
+    static func snapOffset<T: Layoutable>(
         forTileAt index: Int,
-        tiles: [TileModel],
+        tiles: [T],
         viewportWidth: CGFloat
     ) -> CGFloat {
         guard index >= 0, index < tiles.count else { return 0 }
@@ -68,10 +74,10 @@ enum StripLayout {
         return offset
     }
 
-    /// Find the tile index whose left edge is closest to the given scroll offset.
-    static func nearestSnapIndex(
+    /// Find the item index whose left edge is closest to the given scroll offset.
+    static func nearestSnapIndex<T: Layoutable>(
         scrollOffset: CGFloat,
-        tiles: [TileModel],
+        tiles: [T],
         viewportWidth: CGFloat
     ) -> Int {
         guard !tiles.isEmpty else { return 0 }
@@ -94,8 +100,8 @@ enum StripLayout {
     }
 
     /// Maximum allowed scroll offset (right-most scroll position).
-    static func maxScrollOffset(
-        tiles: [TileModel],
+    static func maxScrollOffset<T: Layoutable>(
+        tiles: [T],
         viewportWidth: CGFloat
     ) -> CGFloat {
         let total = totalContentWidth(tiles: tiles, viewportWidth: viewportWidth)

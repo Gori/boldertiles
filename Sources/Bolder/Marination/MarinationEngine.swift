@@ -25,9 +25,6 @@ final class MarinationEngine {
     /// Callback to update a tile's noteStatus.
     var onStatusChanged: ((UUID, NoteStatus) -> Void)?
 
-    /// Callback when a promote suggestion is accepted. Provides (title, description, sourceNoteID).
-    var onPromote: ((String, String, UUID) -> Void)?
-
     /// Callback when phase advances for a note. Provides (noteID, newPhase).
     var onPhaseChanged: ((UUID, MarinationPhase) -> Void)?
 
@@ -127,14 +124,11 @@ final class MarinationEngine {
     // MARK: - Suggestion actions
 
     /// Accept a suggestion, recording it in history.
-    /// For promote suggestions, fires the onPromote callback.
     /// For advancePhase suggestions, advances the phase and resets phaseRoundCount.
     func acceptSuggestion(_ suggestionID: UUID, for noteID: UUID) {
         if var state = storage.loadMarinationState(for: noteID),
            let suggestion = state.suggestions.first(where: { $0.id == suggestionID }) {
             switch suggestion.content {
-            case .promote(let title, let description):
-                onPromote?(title, description, noteID)
             case .advancePhase(let nextPhaseStr, _):
                 if let nextPhase = MarinationPhase(rawValue: nextPhaseStr) {
                     state.phase = nextPhase

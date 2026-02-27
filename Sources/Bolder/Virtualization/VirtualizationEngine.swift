@@ -30,17 +30,18 @@ final class VirtualizationEngine {
     func update(
         frames: [TileFrame],
         viewportWidth: CGFloat,
-        tiles: [TileModel],
+        items: [StripItem],
         containerView: NSView,
-        fontSizeForType: (TileType) -> CGFloat
+        fontSizeForCategory: (ViewCategory) -> CGFloat
     ) {
         let viewport = CGRect(x: 0, y: 0, width: viewportWidth, height: 1)
         var newActiveIDs = Set<UUID>()
 
-        // Determine zone for each tile
+        // Determine zone for each item
         for tf in frames {
             let zone = classify(frame: tf.frame, viewport: viewport, frames: frames, index: tf.index)
-            let tileType = tiles[tf.index].tileType
+            let item = items[tf.index]
+            let category = item.viewCategory
 
             switch zone {
             case .live, .warm:
@@ -58,10 +59,10 @@ final class VirtualizationEngine {
                     }
                 } else {
                     // Get or create a view
-                    let view = pool.dequeue(for: tileType) ?? factory.makeView(for: tileType, frame: tf.frame)
+                    let view = pool.dequeue(for: category) ?? factory.makeView(for: item, frame: tf.frame)
                     view.resetForReuse()
-                    view.configure(with: tiles[tf.index])
-                    view.setFontSize(fontSizeForType(tileType))
+                    view.configureWithItem(items[tf.index])
+                    view.setFontSize(fontSizeForCategory(category))
                     view.frame = tf.frame
                     containerView.addSubview(view)
                     activeViews[tf.tileID] = view
@@ -78,29 +79,25 @@ final class VirtualizationEngine {
             }
         }
 
-        // Recycle views for tiles that are now cold
+        // Recycle views for items that are now cold
         for (id, view) in activeViews where !newActiveIDs.contains(id) {
-            // Determine tile type for pool routing
-            let tileType: TileType
-            if let tile = tiles.first(where: { $0.id == id }) {
-                tileType = tile.tileType
-            } else {
-                tileType = .placeholder
-            }
+            let item = items.first { $0.id == id }
+            let keepAlive = item?.keepAliveWhenCold ?? false
+            let category = item?.viewCategory ?? .idea
 
-            // Terminal and Claude views keep their state alive — just detach from superview
-            if tileType == .terminal || tileType == .claude {
+            if keepAlive {
+                // Terminal and Build-phase idea views keep their state alive — just detach
                 view.removeFromSuperview()
             } else {
                 view.suspend()
                 view.removeFromSuperview()
-                pool.enqueue(view, type: tileType)
+                pool.enqueue(view, category: category)
                 activeViews.removeValue(forKey: id)
             }
         }
     }
 
-    /// Remove a specific tile's view (e.g. when tile is deleted).
+    /// Remove a specific item's view (e.g. when item is deleted).
     func removeView(for tileID: UUID) {
         guard let view = activeViews.removeValue(forKey: tileID) else { return }
         view.suspend()
@@ -134,5 +131,16 @@ final class VirtualizationEngine {
         }
 
         return .cold
+    }
+}
+
+// MARK: - StripItem helpers
+
+extension StripItem {
+    var viewCategory: ViewCategory {
+        switch self {
+        case .idea: return .idea
+        case .terminal: return .terminal
+        }
     }
 }

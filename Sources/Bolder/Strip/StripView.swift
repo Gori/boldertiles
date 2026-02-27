@@ -3,7 +3,7 @@ import QuartzCore
 
 /// The main compositor view that hosts the horizontal strip of tiles.
 final class StripView: NSView {
-    private let model: StripModel
+    private let model: WorkspaceModel
     private let snapAnimator = SnapAnimator()
     private let resizeController: ResizeController
     private let virtualizationEngine: VirtualizationEngine
@@ -22,14 +22,10 @@ final class StripView: NSView {
     private var swipeAccumulator: CGFloat = 0
     private var swipeCommitted = false
 
-    // Vertical swipe state for Features tile overlay
-    private var verticalSwipeAccumulator: CGFloat = 0
-    private var isShowingFeatures = false
-    private var featuresView: FeaturesTileView?
-    private let verticalSnapAnimator = SnapAnimator()
-    private var verticalOffset: CGFloat = 0
+    /// Callback for mode-switch requests (handled by WorkspaceView).
+    var onSwitchMode: ((ViewMode) -> Void)?
 
-    init(model: StripModel, projectStore: ProjectStore, marinationEngine: MarinationEngine? = nil) {
+    init(model: WorkspaceModel, projectStore: ProjectStore, marinationEngine: MarinationEngine? = nil) {
         self.model = model
         self.projectStore = projectStore
         self.marinationEngine = marinationEngine
@@ -43,8 +39,6 @@ final class StripView: NSView {
 
         setupFocusLayer()
         setupSnapAnimator()
-        setupFeaturesOverlay()
-        setupVerticalAnimator()
     }
 
     required init?(coder: NSCoder) {
@@ -69,29 +63,7 @@ final class StripView: NSView {
         }
         snapAnimator.onComplete = { [weak self] in
             guard let self else { return }
-            self.projectStore.save(self.model)
-        }
-    }
-
-    private func setupFeaturesOverlay() {
-        let fv = FeaturesTileView(frame: .zero, projectStore: projectStore)
-        fv.isHidden = true
-        addSubview(fv)
-        self.featuresView = fv
-    }
-
-    private func setupVerticalAnimator() {
-        verticalSnapAnimator.onUpdate = { [weak self] offset in
-            guard let self else { return }
-            self.verticalOffset = offset
-            self.applyVerticalOffset()
-        }
-        verticalSnapAnimator.onComplete = { [weak self] in
-            guard let self else { return }
-            if self.verticalOffset == 0 {
-                self.featuresView?.isHidden = true
-                self.isShowingFeatures = false
-            }
+            self.projectStore.saveWorkspace(self.model)
         }
     }
 
@@ -103,22 +75,19 @@ final class StripView: NSView {
             model.needsInitialScroll = false
             let target = StripLayout.snapOffset(
                 forTileAt: model.focusedIndex,
-                tiles: model.tiles,
+                tiles: model.items,
                 viewportWidth: bounds.width
             )
-            let maxOffset = StripLayout.maxScrollOffset(tiles: model.tiles, viewportWidth: bounds.width)
+            let maxOffset = StripLayout.maxScrollOffset(tiles: model.items, viewportWidth: bounds.width)
             model.scrollOffset = min(target, maxOffset)
         }
-        // Position features view above the viewport
-        featuresView?.frame = NSRect(x: 0, y: -bounds.height, width: bounds.width, height: bounds.height)
         updateLayout()
         updateTrackingArea()
-        applyVerticalOffset()
     }
 
     private func updateLayout() {
         let frames = StripLayout.layout(
-            tiles: model.tiles,
+            tiles: model.items,
             viewportSize: bounds.size,
             scrollOffset: model.scrollOffset,
             scale: window?.backingScaleFactor ?? 2.0
@@ -133,10 +102,10 @@ final class StripView: NSView {
         virtualizationEngine.update(
             frames: frames,
             viewportWidth: bounds.width,
-            tiles: model.tiles,
+            items: model.items,
             containerView: self,
-            fontSizeForType: { [weak self] type in
-                self?.model.fontSize(for: type) ?? TileModel.defaultFontSize(for: type)
+            fontSizeForCategory: { [weak self] category in
+                self?.model.fontSize(for: category) ?? (category == .idea ? 14 : 16)
             }
         )
         updateFocusHighlight(frames: frames)
@@ -209,39 +178,22 @@ final class StripView: NSView {
 
         if event.phase == .began {
             swipeAccumulator = 0
-            verticalSwipeAccumulator = 0
             swipeCommitted = false
         } else if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
             swipeAccumulator = 0
-            verticalSwipeAccumulator = 0
             swipeCommitted = false
             return
         }
 
         guard event.phase == .changed, !swipeCommitted else { return }
 
-        // Detect primarily-vertical gestures for features overlay
-        let isVertical = abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) * 1.5
-        if isVertical {
-            verticalSwipeAccumulator += event.scrollingDeltaY
-
-            if verticalSwipeAccumulator > swipeThreshold && !isShowingFeatures {
-                swipeCommitted = true
-                showFeatures()
-            } else if verticalSwipeAccumulator < -swipeThreshold && isShowingFeatures {
-                swipeCommitted = true
-                hideFeatures()
-            }
-            return
-        }
-
-        // Horizontal swipe (existing behavior)
+        // Horizontal swipe
         swipeAccumulator -= event.scrollingDeltaX
 
         if swipeAccumulator > swipeThreshold {
             swipeCommitted = true
-            if model.focusedIndex >= model.tiles.count - 1 {
-                addTile(type: .notes)
+            if model.focusedIndex >= model.items.count - 1 {
+                addIdea()
             } else {
                 navigateFocus(delta: 1)
             }
@@ -270,7 +222,7 @@ final class StripView: NSView {
     override func mouseMoved(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
         let frames = StripLayout.layout(
-            tiles: model.tiles,
+            tiles: model.items,
             viewportSize: bounds.size,
             scrollOffset: model.scrollOffset,
             scale: window?.backingScaleFactor ?? 2.0
@@ -285,7 +237,7 @@ final class StripView: NSView {
     override func mouseDown(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
         let frames = StripLayout.layout(
-            tiles: model.tiles,
+            tiles: model.items,
             viewportSize: bounds.size,
             scrollOffset: model.scrollOffset,
             scale: window?.backingScaleFactor ?? 2.0
@@ -305,7 +257,7 @@ final class StripView: NSView {
     override func mouseUp(with event: NSEvent) {
         if resizeController.endResize(viewportWidth: bounds.width) {
             updateLayout()
-            projectStore.save(model)
+            projectStore.saveWorkspace(model)
         }
     }
 
@@ -336,24 +288,24 @@ final class StripView: NSView {
         case .shrinkTile:      resizeFocused(delta: -resizeStep)
         case .growTile:        resizeFocused(delta: resizeStep)
         case .toggleFullWidth: toggleFullWidth()
-        case .addNotesTile:    addTile(type: .notes)
-        case .addTerminalTile: addTile(type: .terminal)
-        case .addClaudeTile:   addTile(type: .claude)
-        case .addFeaturesTile: openOrCreateFeaturesTile()
-        case .removeTile:      removeFocusedTile()
+        case .addIdea:         addIdea()
+        case .addTerminalTile: addTerminal()
+        case .removeTile:      removeFocusedItem()
         case .toggleFullscreen: window?.toggleFullScreen(nil)
         case .fontSizeUp:      changeFontSize(delta: fontSizeStep)
         case .fontSizeDown:    changeFontSize(delta: -fontSizeStep)
-        case .refineNote:        break // Replaced by marination system
-        case .saveAsFeature:     saveCurrentNoteAsFeature()
-        case .toggleMarination:  toggleCurrentNoteMarination()
+        case .toggleMarination: toggleCurrentNoteMarination()
+        case .switchToStrip:   onSwitchMode?(.strip)
+        case .switchToBuild:   onSwitchMode?(.build)
+        case .switchToKanban:  onSwitchMode?(.kanban)
+        case .advancePhase:    advanceFocusedPhase()
         }
     }
 
     private func resizeFocused(delta: CGFloat) {
         resizeController.resizeFocused(delta: delta, viewportWidth: bounds.width)
         updateLayout()
-        projectStore.save(model)
+        projectStore.saveWorkspace(model)
     }
 
     private func changeFontSize(delta: CGFloat) {
@@ -361,21 +313,36 @@ final class StripView: NSView {
         let maxSize: CGFloat = 72
 
         let index = model.focusedIndex
-        guard index >= 0, index < model.tiles.count else { return }
-        let tileType = model.tiles[index].tileType
-        let current = model.fontSize(for: tileType)
-        let newSize = max(minSize, min(maxSize, current + delta))
-        model.fontSizes[tileType.rawValue] = newSize
+        guard index >= 0, index < model.items.count else { return }
 
-        // Apply to all visible tiles of this type
-        for tile in model.tiles {
-            guard tile.tileType == tileType else { continue }
-            if let view = virtualizationEngine.view(for: tile.id) {
+        let category: ViewCategory
+        switch model.items[index] {
+        case .idea: category = .idea
+        case .terminal: category = .terminal
+        }
+
+        let current = model.fontSize(for: category)
+        let newSize = max(minSize, min(maxSize, current + delta))
+
+        switch category {
+        case .idea: model.fontSizes["idea"] = newSize
+        case .terminal: model.fontSizes["terminal"] = newSize
+        }
+
+        // Apply to all visible items of this category
+        for item in model.items {
+            let itemCategory: ViewCategory
+            switch item {
+            case .idea: itemCategory = .idea
+            case .terminal: itemCategory = .terminal
+            }
+            guard itemCategory == category else { continue }
+            if let view = virtualizationEngine.view(for: item.id) {
                 view.setFontSize(newSize)
             }
         }
 
-        projectStore.save(model)
+        projectStore.saveWorkspace(model)
     }
 
     // MARK: - Menu actions
@@ -387,20 +354,17 @@ final class StripView: NSView {
     @objc func menuShrinkTile(_ sender: Any?)       { perform(.shrinkTile) }
     @objc func menuGrowTile(_ sender: Any?)         { perform(.growTile) }
     @objc func menuToggleFullWidth(_ sender: Any?)  { perform(.toggleFullWidth) }
-    @objc func menuAddNotesTile(_ sender: Any?)     { perform(.addNotesTile) }
+    @objc func menuAddIdea(_ sender: Any?)          { perform(.addIdea) }
     @objc func menuAddTerminalTile(_ sender: Any?)  { perform(.addTerminalTile) }
     @objc func menuRemoveTile(_ sender: Any?)       { perform(.removeTile) }
     @objc func menuToggleFullscreen(_ sender: Any?) { perform(.toggleFullscreen) }
     @objc func menuFontSizeUp(_ sender: Any?)       { perform(.fontSizeUp) }
     @objc func menuFontSizeDown(_ sender: Any?)     { perform(.fontSizeDown) }
-    @objc func menuAddClaudeTile(_ sender: Any?)      { perform(.addClaudeTile) }
-    @objc func menuAddFeaturesTile(_ sender: Any?)   { perform(.addFeaturesTile) }
-    @objc func menuSaveAsFeature(_ sender: Any?)       { perform(.saveAsFeature) }
-    @objc func menuToggleMarination(_ sender: Any?)    { perform(.toggleMarination) }
+    @objc func menuToggleMarination(_ sender: Any?) { perform(.toggleMarination) }
 
     private func navigateFocus(delta: Int) {
         let newIndex = model.focusedIndex + delta
-        guard newIndex >= 0, newIndex < model.tiles.count else { return }
+        guard newIndex >= 0, newIndex < model.items.count else { return }
 
         model.focusedIndex = newIndex
         scrollToFocused()
@@ -410,213 +374,169 @@ final class StripView: NSView {
     private func moveTile(delta: Int) {
         let src = model.focusedIndex
         let dst = src + delta
-        guard dst >= 0, dst < model.tiles.count else { return }
+        guard dst >= 0, dst < model.items.count else { return }
 
-        model.tiles.swapAt(src, dst)
+        model.items.swapAt(src, dst)
         model.focusedIndex = dst
         scrollToFocused()
-        projectStore.save(model)
+        projectStore.saveWorkspace(model)
     }
 
     private func toggleFullWidth() {
         let index = model.focusedIndex
-        guard index >= 0, index < model.tiles.count else { return }
+        guard index >= 0, index < model.items.count else { return }
 
-        let tile = model.tiles[index]
-        if case .proportional(let f) = tile.widthSpec, f == .one {
-            model.tiles[index].widthSpec = .proportional(.oneHalf)
+        if case .proportional(let f) = model.items[index].widthSpec, f == .one {
+            model.items[index].widthSpec = .proportional(.oneHalf)
         } else {
-            model.tiles[index].widthSpec = .proportional(.one)
+            model.items[index].widthSpec = .proportional(.one)
         }
 
         updateLayout()
-        projectStore.save(model)
+        projectStore.saveWorkspace(model)
     }
 
     private func scrollToFocused() {
         let target = StripLayout.snapOffset(
             forTileAt: model.focusedIndex,
-            tiles: model.tiles,
+            tiles: model.items,
             viewportWidth: bounds.width
         )
-        let maxOffset = StripLayout.maxScrollOffset(tiles: model.tiles, viewportWidth: bounds.width)
+        let maxOffset = StripLayout.maxScrollOffset(tiles: model.items, viewportWidth: bounds.width)
         let clamped = min(target, maxOffset)
 
         snapAnimator.animate(from: model.scrollOffset, to: clamped)
     }
 
-    // MARK: - Vertical Features Overlay
+    // MARK: - Item management
 
-    private func applyVerticalOffset() {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        // Shift all tile layers and content views down by verticalOffset
-        for (_, tileLayer) in tileLayers {
-            tileLayer.transform = CATransform3DMakeTranslation(0, verticalOffset, 0)
-        }
-        // Shift content views
-        for subview in subviews where subview !== featuresView {
-            subview.layer?.transform = CATransform3DMakeTranslation(0, verticalOffset, 0)
-        }
-        // Position features view: starts at -bounds.height, slides down with offset
-        featuresView?.frame = NSRect(
-            x: 0,
-            y: -bounds.height + verticalOffset,
-            width: bounds.width,
-            height: bounds.height
-        )
-        CATransaction.commit()
+    /// Add a new idea after the focused item.
+    private func addIdea() {
+        let newItem = StripItem.idea(IdeaModel())
+        insertItem(newItem)
     }
 
-    private func showFeatures() {
-        guard !isShowingFeatures else { return }
-        isShowingFeatures = true
-        featuresView?.isHidden = false
-        featuresView?.reloadFeatures()
-        verticalSnapAnimator.animate(from: verticalOffset, to: bounds.height)
+    /// Add a new standalone terminal after the focused item.
+    private func addTerminal() {
+        let newItem = StripItem.terminal(TerminalItem())
+        insertItem(newItem)
     }
 
-    private func hideFeatures() {
-        guard isShowingFeatures else { return }
-        verticalSnapAnimator.animate(from: verticalOffset, to: 0)
-    }
-
-    // MARK: - Tile management
-
-    /// Add a new tile of the given type after the focused tile.
-    private func addTile(type: TileType) {
-        let newTile = TileModel(
-            widthSpec: .proportional(.oneHalf),
-            tileType: type,
-            color: .random()
-        )
-        let insertIndex = min(model.focusedIndex + 1, model.tiles.count)
-        model.tiles.insert(newTile, at: insertIndex)
+    private func insertItem(_ item: StripItem) {
+        let insertIndex = min(model.focusedIndex + 1, model.items.count)
+        model.items.insert(item, at: insertIndex)
         model.focusedIndex = insertIndex
 
-        // Snap scroll offset immediately so the new tile is in the viewport
-        // before updateLayout, ensuring the virtualization engine creates its view.
+        // Snap scroll offset immediately so the new item is in the viewport
         let target = StripLayout.snapOffset(
             forTileAt: model.focusedIndex,
-            tiles: model.tiles,
+            tiles: model.items,
             viewportWidth: bounds.width
         )
-        let maxOffset = StripLayout.maxScrollOffset(tiles: model.tiles, viewportWidth: bounds.width)
+        let maxOffset = StripLayout.maxScrollOffset(tiles: model.items, viewportWidth: bounds.width)
         model.scrollOffset = min(target, maxOffset)
 
         updateLayout()
-        projectStore.save(model)
+        projectStore.saveWorkspace(model)
         updateFirstResponder()
     }
 
-    /// Remove the focused tile (minimum 1 tile remains).
-    private func removeFocusedTile() {
-        guard model.tiles.count > 1 else { return }
+    /// Remove the focused item (minimum 1 item remains).
+    private func removeFocusedItem() {
+        guard model.items.count > 1 else { return }
         let index = model.focusedIndex
-        guard index >= 0, index < model.tiles.count else { return }
+        guard index >= 0, index < model.items.count else { return }
 
-        let tile = model.tiles[index]
+        let item = model.items[index]
 
-        // Clean up tile-specific data
-        virtualizationEngine.removeView(for: tile.id)
-        switch tile.tileType {
-        case .notes:
-            projectStore.deleteNoteContent(for: tile.id)
-        case .terminal, .claude:
-            TerminalSessionManager.shared.markInactive(tile.id)
-            projectStore.deleteTerminalMeta(for: tile.id)
-        case .features, .placeholder:
-            break
+        // Clean up item-specific data
+        virtualizationEngine.removeView(for: item.id)
+        switch item {
+        case .idea:
+            projectStore.deleteNoteContent(for: item.id)
+            projectStore.deleteMarinationState(for: item.id)
+        case .terminal:
+            TerminalSessionManager.shared.markInactive(item.id)
+            projectStore.deleteTerminalMeta(for: item.id)
         }
 
-        model.tiles.remove(at: index)
-        model.focusedIndex = min(index, model.tiles.count - 1)
-
+        model.items.remove(at: index)
+        model.focusedIndex = min(index, model.items.count - 1)
 
         updateLayout()
         scrollToFocused()
-        projectStore.save(model)
+        projectStore.saveWorkspace(model)
         updateFirstResponder()
     }
 
     // MARK: - First responder routing
 
-    /// The tile ID of the currently focused tile.
-    private var focusedTileID: UUID? {
-        guard model.focusedIndex >= 0, model.focusedIndex < model.tiles.count else { return nil }
-        return model.tiles[model.focusedIndex].id
+    /// The item ID of the currently focused item.
+    private var focusedItemID: UUID? {
+        guard model.focusedIndex >= 0, model.focusedIndex < model.items.count else { return nil }
+        return model.items[model.focusedIndex].id
     }
 
-    /// Update the first responder based on the focused tile type.
+    /// Update the first responder based on the focused item type.
     func updateFirstResponder() {
-        guard let tileID = focusedTileID else {
+        guard let itemID = focusedItemID else {
             window?.makeFirstResponder(self)
             return
         }
 
-        let tile = model.tiles[model.focusedIndex]
-        guard let view = virtualizationEngine.view(for: tileID) else {
+        let item = model.items[model.focusedIndex]
+        guard let view = virtualizationEngine.view(for: itemID) else {
             window?.makeFirstResponder(self)
             return
         }
 
-        switch tile.tileType {
-        case .notes:
-            if let notesView = view as? NotesTileView {
+        switch item {
+        case .idea:
+            if let ideaView = view as? IdeaTileView {
+                ideaView.makeInnerFirstResponder(in: window)
+            } else if let notesView = view as? NotesTileView {
                 window?.makeFirstResponder(notesView.innerWebView)
             }
         case .terminal:
             if let terminalView = view as? TerminalTileView {
                 window?.makeFirstResponder(terminalView.innerSurfaceView)
             }
-        case .claude:
-            if let claudeView = view as? ClaudeTileView {
-                window?.makeFirstResponder(claudeView.innerSurfaceView)
-            }
-        case .features, .placeholder:
-            window?.makeFirstResponder(self)
         }
     }
 
-    // MARK: - Feature actions
+    // MARK: - Idea actions
 
     private func toggleCurrentNoteMarination() {
         let index = model.focusedIndex
-        guard index >= 0, index < model.tiles.count,
-              model.tiles[index].tileType == .notes else { return }
-        guard let notesView = virtualizationEngine.view(for: model.tiles[index].id) as? NotesTileView else { return }
-        notesView.toggleMarination()
+        guard index >= 0, index < model.items.count else { return }
+        guard case .idea = model.items[index] else { return }
+        guard let view = virtualizationEngine.view(for: model.items[index].id) else { return }
+
+        if let ideaView = view as? IdeaTileView {
+            ideaView.toggleMarination()
+        } else if let notesView = view as? NotesTileView {
+            notesView.toggleMarination()
+        }
     }
 
-    private func saveCurrentNoteAsFeature() {
+    private func advanceFocusedPhase() {
         let index = model.focusedIndex
-        guard index >= 0, index < model.tiles.count,
-              model.tiles[index].tileType == .notes else { return }
-        guard let notesView = virtualizationEngine.view(for: model.tiles[index].id) as? NotesTileView else { return }
+        guard index >= 0, index < model.items.count else { return }
+        guard case .idea(var idea) = model.items[index] else { return }
 
-        notesView.saveAsFeature(projectURL: projectStore.projectURL) { [weak self] feature in
-            guard let self, let feature else { return }
-            var store = self.projectStore.loadFeatures()
-            store.features.append(feature)
-            self.projectStore.saveFeatures(store)
-            self.openOrCreateFeaturesTile()
-        }
-    }
-
-    private func openOrCreateFeaturesTile() {
-        // Navigate to existing features tile if one exists
-        if let existingIndex = model.tiles.firstIndex(where: { $0.tileType == .features }) {
-            model.focusedIndex = existingIndex
-            // Reload the features view
-            if let featuresView = virtualizationEngine.view(for: model.tiles[existingIndex].id) as? FeaturesTileView {
-                featuresView.reloadFeatures()
-            }
-            scrollToFocused()
-            updateFirstResponder()
-            return
+        switch idea.phase {
+        case .note:  idea.phase = .plan
+        case .plan:  idea.phase = .build
+        case .build: idea.phase = .done
+        case .done:  return
         }
 
-        // Create a new features tile
-        addTile(type: .features)
+        model.items[index] = .idea(idea)
+        projectStore.saveWorkspace(model)
+
+        // Notify the view of the phase change
+        if let ideaView = virtualizationEngine.view(for: idea.id) as? IdeaTileView {
+            ideaView.phaseDidChange(idea.phase)
+        }
     }
 }

@@ -15,7 +15,6 @@ final class NotesTileView: NSView, TileContentView {
     private var saveWorkItem: DispatchWorkItem?
     private let saveDebounce: TimeInterval = 0.3
     private var isDirty = false
-    private var featureExtractor: FeatureExtractor?
     private var cachedContent: String = ""
     private var hasPendingSuggestions = false
     private var webViewReady = false
@@ -72,7 +71,6 @@ final class NotesTileView: NSView, TileContentView {
     private func setupContextMenu() {
         notesWebView.extraMenuItems = [
             NSMenuItem(title: "Start Marinating", action: #selector(contextToggleMarination), keyEquivalent: ""),
-            NSMenuItem(title: "Save as Feature", action: #selector(contextSaveAsFeature), keyEquivalent: ""),
         ]
         // Set targets so the responder chain finds us
         for item in notesWebView.extraMenuItems {
@@ -363,31 +361,6 @@ final class NotesTileView: NSView, TileContentView {
 
     @objc private func contextToggleMarination(_ sender: Any?) {
         toggleMarination()
-    }
-
-    @objc private func contextSaveAsFeature(_ sender: Any?) {
-        saveAsFeature(projectURL: projectStore.projectURL, completion: nil)
-    }
-
-    // MARK: - Save as Feature
-
-    func saveAsFeature(projectURL: URL, completion: ((Feature?) -> Void)?) {
-        guard featureExtractor == nil else { return }
-        let noteText = cachedContent
-        guard !noteText.isEmpty, let noteID = tileID else {
-            completion?(nil)
-            return
-        }
-
-        let extractor = FeatureExtractor(projectURL: projectURL)
-        self.featureExtractor = extractor
-
-        extractor.onComplete = { [weak self] feature in
-            self?.featureExtractor = nil
-            completion?(feature)
-        }
-
-        extractor.extract(noteText: noteText, noteID: noteID)
     }
 
     // MARK: - Key handling for suggestions

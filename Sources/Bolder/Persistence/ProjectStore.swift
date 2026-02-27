@@ -13,10 +13,10 @@ final class ProjectStore {
     let projectURL: URL
     private let bolderDirURL: URL
     private let tilesFileURL: URL
+    private let workspaceFileURL: URL
     private let projectFileURL: URL
     private let notesDirURL: URL
     private let terminalDirURL: URL
-    private let featuresFileURL: URL
     private let marinationDirURL: URL
     private let writeQueue = DispatchQueue(label: "com.bolder.persistence", qos: .utility)
 
@@ -24,10 +24,10 @@ final class ProjectStore {
         self.projectURL = projectURL
         self.bolderDirURL = projectURL.appendingPathComponent(".bolder", isDirectory: true)
         self.tilesFileURL = bolderDirURL.appendingPathComponent("tiles.json")
+        self.workspaceFileURL = bolderDirURL.appendingPathComponent("workspace.json")
         self.projectFileURL = bolderDirURL.appendingPathComponent("project.json")
         self.notesDirURL = bolderDirURL.appendingPathComponent("notes", isDirectory: true)
         self.terminalDirURL = bolderDirURL.appendingPathComponent("terminal", isDirectory: true)
-        self.featuresFileURL = bolderDirURL.appendingPathComponent("features.json")
         self.marinationDirURL = bolderDirURL.appendingPathComponent("marination", isDirectory: true)
     }
 
@@ -75,6 +75,74 @@ final class ProjectStore {
             print("Failed to encode model: \(error)")
         }
     }
+    // MARK: - Workspace persistence
+
+    /// Load the workspace model from disk. Tries workspace.json first, falls back to
+    /// migrating from tiles.json if workspace.json doesn't exist.
+    func loadWorkspace() -> WorkspaceModel? {
+        // Try workspace.json first
+        if FileManager.default.fileExists(atPath: workspaceFileURL.path) {
+            do {
+                let data = try Data(contentsOf: workspaceFileURL)
+                return try JSONDecoder().decode(WorkspaceModel.self, from: data)
+            } catch {
+                print("Failed to load workspace.json: \(error)")
+            }
+        }
+
+        // Fall back to migrating from tiles.json
+        if let legacy = loadLegacyStrip() {
+            let workspace = WorkspaceMigration.migrate(from: legacy)
+            saveWorkspace(workspace)
+            return workspace
+        }
+
+        return nil
+    }
+
+    /// Save the workspace model to disk asynchronously.
+    func saveWorkspace(_ model: WorkspaceModel) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        do {
+            let data = try encoder.encode(model)
+            writeQueue.async { [bolderDirURL, workspaceFileURL, projectFileURL] in
+                do {
+                    try FileManager.default.createDirectory(
+                        at: bolderDirURL,
+                        withIntermediateDirectories: true
+                    )
+                    try data.write(to: workspaceFileURL, options: .atomic)
+
+                    if !FileManager.default.fileExists(atPath: projectFileURL.path) {
+                        let projectMeta = ProjectMeta(version: 2, createdAt: Date())
+                        let metaData = try JSONEncoder().encode(projectMeta)
+                        try metaData.write(to: projectFileURL, options: .atomic)
+                    }
+                } catch {
+                    print("Failed to save workspace: \(error)")
+                }
+            }
+        } catch {
+            print("Failed to encode workspace: \(error)")
+        }
+    }
+
+    /// Load legacy StripModel from tiles.json.
+    func loadLegacyStrip() -> StripModel? {
+        guard FileManager.default.fileExists(atPath: tilesFileURL.path) else {
+            return nil
+        }
+        do {
+            let data = try Data(contentsOf: tilesFileURL)
+            return try JSONDecoder().decode(StripModel.self, from: data)
+        } catch {
+            print("Failed to load tiles.json: \(error)")
+            return nil
+        }
+    }
+
     // MARK: - Notes persistence
 
     /// Load note content for a tile (synchronous, called from main thread).
@@ -134,34 +202,6 @@ final class ProjectStore {
         let fileURL = terminalDirURL.appendingPathComponent("\(tileID.uuidString).json")
         writeQueue.async {
             try? FileManager.default.removeItem(at: fileURL)
-        }
-    }
-
-    // MARK: - Features persistence
-
-    /// Load the features store from disk synchronously.
-    func loadFeatures() -> FeaturesStore {
-        guard FileManager.default.fileExists(atPath: featuresFileURL.path),
-              let data = try? Data(contentsOf: featuresFileURL),
-              let store = try? JSONDecoder().decode(FeaturesStore.self, from: data) else {
-            return FeaturesStore()
-        }
-        return store
-    }
-
-    /// Save the features store to disk asynchronously.
-    func saveFeatures(_ store: FeaturesStore) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(store) else { return }
-
-        writeQueue.async { [bolderDirURL, featuresFileURL] in
-            do {
-                try FileManager.default.createDirectory(at: bolderDirURL, withIntermediateDirectories: true)
-                try data.write(to: featuresFileURL, options: .atomic)
-            } catch {
-                print("Failed to save features: \(error)")
-            }
         }
     }
 

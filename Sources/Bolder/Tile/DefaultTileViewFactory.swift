@@ -1,11 +1,11 @@
 import AppKit
 
-/// Protocol for creating tile content views by type.
+/// Protocol for creating tile content views.
 protocol TileViewFactory {
-    func makeView(for type: TileType, frame: NSRect) -> NSView & TileContentView
+    func makeView(for item: StripItem, frame: NSRect) -> NSView & TileContentView
 }
 
-/// Default factory creating the appropriate view for each tile type.
+/// Default factory creating the appropriate view for each strip item type.
 final class DefaultTileViewFactory: TileViewFactory {
     private let projectStore: ProjectStore
     private weak var marinationEngine: MarinationEngine?
@@ -15,18 +15,12 @@ final class DefaultTileViewFactory: TileViewFactory {
         self.marinationEngine = marinationEngine
     }
 
-    func makeView(for type: TileType, frame: NSRect) -> NSView & TileContentView {
-        switch type {
-        case .placeholder:
-            return PlaceholderTileView(frame: frame)
-        case .notes:
-            return NotesTileView(frame: frame, projectStore: projectStore, marinationEngine: marinationEngine)
+    func makeView(for item: StripItem, frame: NSRect) -> NSView & TileContentView {
+        switch item {
+        case .idea:
+            return IdeaTileView(frame: frame, projectStore: projectStore, marinationEngine: marinationEngine)
         case .terminal:
             return TerminalTileView(frame: frame)
-        case .claude:
-            return ClaudeTileView(frame: frame, projectStore: projectStore)
-        case .features:
-            return FeaturesTileView(frame: frame, projectStore: projectStore)
         }
     }
 }

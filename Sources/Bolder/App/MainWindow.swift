@@ -1,15 +1,15 @@
 import AppKit
 
 final class MainWindow: NSWindow {
-    private let stripView: StripView
+    private let workspaceView: WorkspaceView
 
-    init(stripModel: StripModel, projectStore: ProjectStore, marinationEngine: MarinationEngine? = nil) {
+    init(model: WorkspaceModel, projectStore: ProjectStore, marinationEngine: MarinationEngine? = nil) {
         guard let screen = NSScreen.main else {
             fatalError("No screen available")
         }
 
-        let stripView = StripView(model: stripModel, projectStore: projectStore, marinationEngine: marinationEngine)
-        self.stripView = stripView
+        let workspaceView = WorkspaceView(model: model, projectStore: projectStore, marinationEngine: marinationEngine)
+        self.workspaceView = workspaceView
 
         super.init(
             contentRect: screen.visibleFrame,
@@ -18,7 +18,7 @@ final class MainWindow: NSWindow {
             defer: false
         )
 
-        self.contentView = stripView
+        self.contentView = workspaceView
         self.backgroundColor = .black
         self.isMovableByWindowBackground = false
         self.level = .normal

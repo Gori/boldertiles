@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 swift build          # Build the project
-swift test           # Run all 29 tests
+swift test           # Run all 125 tests
 swift test --filter BolderTests.StripLayoutTests    # Run a single test suite
 swift test --filter BolderTests.StripLayoutTests/testSingleTileAtOrigin  # Run a single test
 ```
@@ -18,22 +18,49 @@ GhosttyKit is optional. The app builds and runs without it (no terminal tiles). 
 
 ## Architecture
 
-Bolder is a macOS fullscreen horizontal tiling compositor. A single window contains a `StripView` with an unlimited horizontal strip of tiles. Users swipe between tiles, resize them, and each tile hosts content (notes editor, terminal, or placeholder).
+Bolder is a macOS fullscreen idea-centric tiling compositor. Ideas are the primary entity — each idea is an evolved note that gains a Claude Code session when it reaches the Build phase. Three view modes (Strip, Build, Kanban) provide different lenses onto the same data.
 
-### Core data flow
+### Core data model
 
-`StripModel` (tiles + focusedIndex + scrollOffset) → `StripLayout.layout()` (pure function) → `[TileFrame]` → applied to both `CALayer`s (visual) and `NSView`s (content) via `VirtualizationEngine`.
+- **IdeaModel**: primary entity with `phase` (Note → Plan → Build → Done), `widthSpec`, `color`, `marinationPhase`, `noteStatus`
+- **StripItem**: enum `.idea(IdeaModel)` | `.terminal(TerminalItem)` — items in the strip
+- **WorkspaceModel**: top-level state containing `[StripItem]`, `focusedIndex`, `scrollOffset`, `viewMode`, `selectedBuildIdeaID`, `fontSizes`
+- **ViewMode**: `.strip` | `.build` | `.kanban`
 
-Layout is a pure function with no side effects. All state lives in `StripModel`. The `StripView` orchestrates input, layout, and rendering.
+### View hierarchy
+
+`WorkspaceView` (top-level) owns three child views, one visible at a time:
+- **StripView**: horizontal tile strip (Cmd+1)
+- **BuildView**: sidebar + Claude Code + note panel (Cmd+2)
+- **KanbanView**: four-column board (Cmd+3)
+
+### Core data flow (Strip mode)
+
+`WorkspaceModel` (items + focusedIndex + scrollOffset) → `StripLayout.layout()` (pure generic function over `Layoutable` protocol) → `[TileFrame]` → applied to both `CALayer`s (visual) and `NSView`s (content) via `VirtualizationEngine`.
+
+Layout is a pure function with no side effects. All state lives in `WorkspaceModel`. The `StripView` orchestrates input, layout, and rendering.
+
+### Idea phases and AI behavior
+
+- **Note**: free writing, no AI assistance
+- **Plan**: structured suggestions via MarinationEngine (background Claude requests)
+- **Build**: Claude Code terminal session (toggled with note view via Cmd+.)
+- **Done**: read-only appearance (dimmed)
+
+### IdeaTileView (composite tile)
+
+`IdeaTileView` adapts its content based on idea phase. Internally owns a `NotesTileView` (always) and a `ClaudeTileView` (lazy, created on first Build phase entry). In Build phase, Cmd+. toggles between note and Claude Code views.
 
 ### Virtualization (3-zone lifecycle)
 
-`VirtualizationEngine` classifies tiles into zones based on viewport proximity:
+`VirtualizationEngine` classifies items into zones based on viewport proximity:
 - **Live**: intersects viewport — `activate()` called, fully rendering
-- **Warm**: within 2 tiles of viewport — `throttle()` called, initialized but reduced work
+- **Warm**: within 2 items of viewport — `throttle()` called, initialized but reduced work
 - **Cold**: offscreen — `suspend()` called, view recycled to `TileViewPool`
 
-Exception: terminal views are never pooled. They stay in `activeViews` when cold (removed from superview but surface/PTY kept alive) so sessions survive scrolling.
+Exception: terminals and Build-phase ideas are never pooled (`keepAliveWhenCold`). They stay in `activeViews` when cold so sessions survive scrolling.
+
+Pool is keyed by `ViewCategory` (`.idea` | `.terminal`).
 
 ### Tile content protocol
 
@@ -44,10 +71,11 @@ protocol TileContentView: NSView {
     func suspend()
     func resetForReuse()
     func configure(with tile: TileModel)
+    func configureWithItem(_ item: StripItem)
 }
 ```
 
-Implementations: `PlaceholderTileView`, `NotesTileView`, `TerminalTileView`. New tile types implement this protocol and register in `DefaultTileViewFactory`.
+Implementations: `IdeaTileView`, `NotesTileView`, `TerminalTileView`, `ClaudeTileView`. New tile types implement this protocol and register in `DefaultTileViewFactory`.
 
 ### Width system
 
@@ -63,14 +91,19 @@ Terminal architecture: `GhosttyBridge` (singleton, owns `ghostty_app_t`) → `Te
 
 ```
 <project>/.bolder/
-├── tiles.json              # StripModel (tile array, focus index)
-├── notes/<uuid>.md         # Note content per tile
-└── terminal/<uuid>.json    # TerminalMeta per tile
+├── workspace.json          # WorkspaceModel (items, focus index, view mode)
+├── notes/<uuid>.md         # Note content per idea
+├── terminal/<uuid>.json    # TerminalMeta per terminal
+└── marination/<uuid>.json  # MarinationState per idea (Plan phase)
 ```
+
+Legacy `tiles.json` is auto-migrated to `workspace.json` via `WorkspaceMigration` on first load.
 
 ### Input routing
 
-Keyboard shortcuts use `performKeyEquivalent` (fires before the responder chain) so Ctrl combos work regardless of which tile's inner view is first responder. Focus routing (`updateFirstResponder`) makes the appropriate inner view (NSTextView for notes, TerminalSurfaceView for terminal) the first responder.
+Keyboard shortcuts use `performKeyEquivalent` (fires before the responder chain) so Ctrl combos work regardless of which tile's inner view is first responder. Focus routing (`updateFirstResponder`) makes the appropriate inner view (WKWebView for notes, TerminalSurfaceView for terminal/claude) the first responder.
+
+Key shortcuts: Cmd+1/2/3 switch modes, Cmd+Shift+Right advances idea phase, Cmd+. toggles note/Claude in Build phase.
 
 ### Rendering
 

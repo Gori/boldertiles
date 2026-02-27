@@ -2,7 +2,7 @@ import AppKit
 
 final class BolderAppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindow: MainWindow?
-    private var stripModel: StripModel!
+    private var workspaceModel: WorkspaceModel!
     private var projectStore: ProjectStore?
     private var settingsWindow: SettingsWindow?
     private var projectURL: URL!
@@ -33,59 +33,60 @@ final class BolderAppDelegate: NSObject, NSApplicationDelegate {
         // Load settings before creating the window
         SettingsManager.shared.load(projectURL: projectURL)
 
-        if let loaded = store.load() {
-            self.stripModel = loaded
+        if let loaded = store.loadWorkspace() {
+            self.workspaceModel = loaded
         } else {
-            self.stripModel = StripModel.defaultModel()
+            self.workspaceModel = WorkspaceModel.defaultModel()
         }
 
         // Create marination engine
         let engine = MarinationEngine(storage: store, projectURL: projectURL)
         self.marinationEngine = engine
 
-        // Wire engine to model
+        // Wire engine to model — only Plan-phase ideas
         engine.getTiles = { [weak self] in
-            self?.stripModel.tiles ?? []
-        }
-        engine.onPromote = { [weak self] title, description, sourceNoteID in
-            guard let self, let store = self.projectStore else { return }
-            let feature = Feature(title: title, description: description, sourceNoteID: sourceNoteID)
-            var featuresStore = store.loadFeatures()
-            featuresStore.features.append(feature)
-            store.saveFeatures(featuresStore)
-            NotificationCenter.default.post(name: .init("featuresDidChange"), object: nil)
+            guard let self else { return [] }
+            return self.workspaceModel.ideas
+                .filter { $0.phase == .plan }
+                .map { idea in
+                    TileModel(
+                        id: idea.id,
+                        widthSpec: idea.widthSpec,
+                        tileType: .notes,
+                        color: idea.color,
+                        noteStatus: idea.noteStatus,
+                        marinationPhase: idea.marinationPhase
+                    )
+                }
         }
 
         engine.onStatusChanged = { [weak self] noteID, status in
             guard let self else { return }
-            if let index = self.stripModel.tiles.firstIndex(where: { $0.id == noteID }) {
-                self.stripModel.tiles[index].noteStatus = status
-                self.projectStore?.save(self.stripModel)
-                let phase = self.stripModel.tiles[index].marinationPhase
-                NotificationCenter.default.post(
-                    name: .marinationStatusChanged,
-                    object: nil,
-                    userInfo: ["noteID": noteID, "status": status.rawValue, "phase": phase]
-                )
-            }
+            self.workspaceModel.mutateIdea(noteID) { $0.noteStatus = status }
+            self.projectStore?.saveWorkspace(self.workspaceModel)
+            let idea = self.workspaceModel.idea(for: noteID)
+            let phase = idea?.marinationPhase ?? .ingest
+            NotificationCenter.default.post(
+                name: .marinationStatusChanged,
+                object: nil,
+                userInfo: ["noteID": noteID, "status": status.rawValue, "phase": phase]
+            )
         }
 
         engine.onPhaseChanged = { [weak self] noteID, phase in
             guard let self else { return }
-            if let index = self.stripModel.tiles.firstIndex(where: { $0.id == noteID }) {
-                self.stripModel.tiles[index].marinationPhase = phase
-                self.projectStore?.save(self.stripModel)
-                NotificationCenter.default.post(
-                    name: .marinationPhaseChanged,
-                    object: nil,
-                    userInfo: ["noteID": noteID, "phase": phase.rawValue]
-                )
-            }
+            self.workspaceModel.mutateIdea(noteID) { $0.marinationPhase = phase }
+            self.projectStore?.saveWorkspace(self.workspaceModel)
+            NotificationCenter.default.post(
+                name: .marinationPhaseChanged,
+                object: nil,
+                userInfo: ["noteID": noteID, "phase": phase.rawValue]
+            )
         }
 
         buildMainMenu()
 
-        let window = MainWindow(stripModel: stripModel, projectStore: store, marinationEngine: engine)
+        let window = MainWindow(model: workspaceModel, projectStore: store, marinationEngine: engine)
         window.makeKeyAndOrderFront(nil)
         self.mainWindow = window
 
@@ -109,7 +110,7 @@ final class BolderAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         marinationEngine?.stop()
         if let store = projectStore {
-            store.save(stripModel)
+            store.saveWorkspace(workspaceModel)
         }
         TerminalSessionManager.shared.destroyAll()
         GhosttyBridge.shared.shutdown()
@@ -136,6 +137,10 @@ final class BolderAppDelegate: NSObject, NSApplicationDelegate {
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
         addShortcutItem(to: viewMenu, action: .toggleFullscreen, selector: #selector(StripView.menuToggleFullscreen(_:)))
+        viewMenu.addItem(.separator())
+        addShortcutItem(to: viewMenu, action: .switchToStrip, selector: #selector(StripView.menuFocusLeft(_:)))
+        addShortcutItem(to: viewMenu, action: .switchToBuild, selector: #selector(StripView.menuFocusLeft(_:)))
+        addShortcutItem(to: viewMenu, action: .switchToKanban, selector: #selector(StripView.menuFocusLeft(_:)))
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 
@@ -152,13 +157,10 @@ final class BolderAppDelegate: NSObject, NSApplicationDelegate {
         addShortcutItem(to: tilesMenu, action: .growTile, selector: #selector(StripView.menuGrowTile(_:)))
         addShortcutItem(to: tilesMenu, action: .toggleFullWidth, selector: #selector(StripView.menuToggleFullWidth(_:)))
         tilesMenu.addItem(.separator())
-        addShortcutItem(to: tilesMenu, action: .addNotesTile, selector: #selector(StripView.menuAddNotesTile(_:)))
+        addShortcutItem(to: tilesMenu, action: .addIdea, selector: #selector(StripView.menuAddIdea(_:)))
         addShortcutItem(to: tilesMenu, action: .addTerminalTile, selector: #selector(StripView.menuAddTerminalTile(_:)))
-        addShortcutItem(to: tilesMenu, action: .addClaudeTile, selector: #selector(StripView.menuAddClaudeTile(_:)))
-        addShortcutItem(to: tilesMenu, action: .addFeaturesTile, selector: #selector(StripView.menuAddFeaturesTile(_:)))
         tilesMenu.addItem(.separator())
         addShortcutItem(to: tilesMenu, action: .toggleMarination, selector: #selector(StripView.menuToggleMarination(_:)))
-        addShortcutItem(to: tilesMenu, action: .saveAsFeature, selector: #selector(StripView.menuSaveAsFeature(_:)))
         tilesMenu.addItem(.separator())
         addShortcutItem(to: tilesMenu, action: .removeTile, selector: #selector(StripView.menuRemoveTile(_:)))
         tilesMenuItem.submenu = tilesMenu

@@ -2,7 +2,7 @@ import Foundation
 
 /// A single-turn headless Claude request. Sends a prompt, accumulates the response,
 /// and delivers the result on turn completion. Handles JSON fence stripping, error events,
-/// and timeout. DRY helper used by FeatureExtractor and MarinationEngine.
+/// and timeout. DRY helper used by MarinationEngine.
 final class HeadlessClaudeRequest {
     enum Result {
         case text(String)
