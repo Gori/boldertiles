@@ -7,6 +7,7 @@ final class KanbanColumnView: NSView {
     private let headerLabel = NSTextField(labelWithString: "")
     private let countLabel = NSTextField(labelWithString: "0")
     private let scrollView = NSScrollView()
+    private let containerView = FlippedView()
     private let stackView = NSStackView()
 
     var onDropIdea: ((UUID, IdeaPhase) -> Void)?
@@ -58,16 +59,18 @@ final class KanbanColumnView: NSView {
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
 
         stackView.orientation = .vertical
         stackView.alignment = .leading
         stackView.spacing = 8
         stackView.translatesAutoresizingMaskIntoConstraints = false
 
-        let clipView = NSClipView()
-        clipView.drawsBackground = false
-        clipView.documentView = stackView
-        scrollView.contentView = clipView
+        // Use a flipped container so content starts at the top
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(stackView)
+        scrollView.documentView = containerView
 
         addSubview(scrollView)
 
@@ -76,11 +79,24 @@ final class KanbanColumnView: NSView {
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
-
-            stackView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
-            stackView.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
-            stackView.topAnchor.constraint(equalTo: clipView.topAnchor),
         ])
+
+        // Pin the stack view inside the flipped container
+        NSLayoutConstraint.activate([
+            stackView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            stackView.bottomAnchor.constraint(lessThanOrEqualTo: containerView.bottomAnchor),
+        ])
+    }
+
+    override func layout() {
+        super.layout()
+        // Keep the container view's width matched to the clip view to prevent horizontal overflow
+        let clipWidth = scrollView.contentView.bounds.width
+        if containerView.frame.width != clipWidth {
+            containerView.frame.size.width = clipWidth
+        }
     }
 
     func reload(ideas: [IdeaModel], noteContentLoader: (UUID) -> String?) {
@@ -154,4 +170,11 @@ final class KanbanColumnView: NSView {
         layer?.borderColor = CGColor.clear
         layer?.borderWidth = 0
     }
+}
+
+// MARK: - Flipped container
+
+/// An NSView with flipped coordinates so content starts at the top.
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

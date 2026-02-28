@@ -3,6 +3,7 @@ import AppKit
 /// Scrollable sidebar listing all Build-phase ideas.
 final class BuildSidebarView: NSView {
     private let scrollView = NSScrollView()
+    private let containerView = FlippedView()
     private let stackView = NSStackView()
     private let headerLabel = NSTextField(labelWithString: "BUILD")
 
@@ -42,16 +43,16 @@ final class BuildSidebarView: NSView {
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
+        scrollView.automaticallyAdjustsContentInsets = false
 
         stackView.orientation = .vertical
         stackView.alignment = .leading
         stackView.spacing = 2
         stackView.translatesAutoresizingMaskIntoConstraints = false
 
-        let clipView = NSClipView()
-        clipView.drawsBackground = false
-        clipView.documentView = stackView
-        scrollView.contentView = clipView
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(stackView)
+        scrollView.documentView = containerView
 
         addSubview(scrollView)
 
@@ -61,15 +62,23 @@ final class BuildSidebarView: NSView {
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
 
-            stackView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
-            stackView.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
-            stackView.topAnchor.constraint(equalTo: clipView.topAnchor),
+            stackView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            stackView.bottomAnchor.constraint(lessThanOrEqualTo: containerView.bottomAnchor),
         ])
+    }
+
+    override func layout() {
+        super.layout()
+        let clipWidth = scrollView.contentView.bounds.width
+        if containerView.frame.width != clipWidth {
+            containerView.frame.size.width = clipWidth
+        }
     }
 
     /// Reload the sidebar with the given ideas.
     func reload(ideas: [IdeaModel], noteContentLoader: (UUID) -> String?, selectedID: UUID?) {
-        // Remove old items
         for item in itemViews {
             stackView.removeArrangedSubview(item)
             item.removeFromSuperview()
@@ -103,4 +112,9 @@ final class BuildSidebarView: NSView {
         }
         onSelectIdea?(id)
     }
+}
+
+/// An NSView with flipped coordinates so content starts at the top.
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

@@ -10,6 +10,7 @@ final class WorkspaceView: NSView {
     private let stripView: StripView
     private var buildView: BuildView?
     private var kanbanView: KanbanView?
+    private let transitionOverlay = ModeTransitionOverlay()
 
     init(model: WorkspaceModel, projectStore: ProjectStore, marinationEngine: MarinationEngine? = nil) {
         self.model = model
@@ -69,6 +70,7 @@ final class WorkspaceView: NSView {
         }
 
         projectStore.saveWorkspace(model)
+        transitionOverlay.show(mode: mode, in: self)
     }
 
     private func ensureBuildView() {
