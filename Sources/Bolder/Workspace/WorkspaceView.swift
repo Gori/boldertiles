@@ -107,9 +107,11 @@ final class WorkspaceView: NSView {
 
         model.selectedBuildIdeaID = ideaID
 
+        // Create the claude view with prompt BEFORE switchMode,
+        // since switchMode → reload() would create it without the prompt.
         ensureBuildView()
-        switchMode(to: .build)
         buildView?.selectIdeaWithPrompt(ideaID, prompt: prompt)
+        switchMode(to: .build)
     }
 
     /// The inner strip view, for menu action routing.

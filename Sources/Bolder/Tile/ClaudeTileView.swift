@@ -53,22 +53,19 @@ final class ClaudeTileView: NSView, TileContentView {
             TerminalSessionManager.shared.markActive(tile.id)
 
             let sessionId = tile.id.uuidString
+            let isNewSession = projectStore.loadTerminalMeta(for: tile.id) == nil
             let command: String
-            if projectStore.loadTerminalMeta(for: tile.id) != nil {
-                // Session was launched before — resume it
-                command = "claude --resume \(sessionId)"
+            if isNewSession, let prompt = initialPrompt {
+                let escaped = prompt
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"")
+                    .replacingOccurrences(of: "$", with: "\\$")
+                    .replacingOccurrences(of: "`", with: "\\`")
+                command = "claude --session-id \(sessionId) \"\(escaped)\""
             } else {
-                // First launch — create session with this specific ID
-                if let prompt = initialPrompt {
-                    let escaped = prompt
-                        .replacingOccurrences(of: "\\", with: "\\\\")
-                        .replacingOccurrences(of: "\"", with: "\\\"")
-                        .replacingOccurrences(of: "$", with: "\\$")
-                        .replacingOccurrences(of: "`", with: "\\`")
-                    command = "claude --session-id \(sessionId) \"\(escaped)\""
-                } else {
-                    command = "claude --session-id \(sessionId)"
-                }
+                command = "claude --session-id \(sessionId)"
+            }
+            if isNewSession {
                 projectStore.saveTerminalMeta(
                     TerminalMeta(command: "claude", cwd: nil, environment: nil),
                     for: tile.id

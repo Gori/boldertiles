@@ -169,15 +169,19 @@ final class BuildView: NSView {
             addSubview(cv)
             claudeViews[ideaID] = cv
 
-            // Configure with a TileModel matching the idea
+            // Only start the Claude CLI if there's a prior session to resume
+            // or an explicit build prompt. Otherwise wait for the user to trigger build.
             if let idea = model.idea(for: ideaID) {
-                let tile = TileModel(
-                    id: idea.id,
-                    widthSpec: idea.widthSpec,
-                    tileType: .claude,
-                    color: idea.color
-                )
-                cv.configure(with: tile)
+                let hasPriorSession = projectStore.loadTerminalMeta(for: idea.id) != nil
+                if hasPriorSession || initialPrompt != nil {
+                    let tile = TileModel(
+                        id: idea.id,
+                        widthSpec: idea.widthSpec,
+                        tileType: .claude,
+                        color: idea.color
+                    )
+                    cv.configure(with: tile)
+                }
             }
         }
 
