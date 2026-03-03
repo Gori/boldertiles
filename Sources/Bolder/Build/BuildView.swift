@@ -135,7 +135,25 @@ final class BuildView: NSView {
         )
     }
 
-    private func showClaudeView(for ideaID: UUID) {
+    /// Select an idea and pass an initial prompt to Claude Code for new sessions.
+    func selectIdeaWithPrompt(_ id: UUID, prompt: String) {
+        model.selectedBuildIdeaID = id
+        projectStore.saveWorkspace(model)
+
+        showClaudeView(for: id, initialPrompt: prompt)
+        showNotePanel(for: id)
+
+        let buildIdeas = model.ideas.filter { $0.phase == .build }
+        sidebar.reload(
+            ideas: buildIdeas,
+            noteContentLoader: { [weak self] id in
+                self?.projectStore.loadNoteContent(for: id)
+            },
+            selectedID: id
+        )
+    }
+
+    private func showClaudeView(for ideaID: UUID, initialPrompt: String? = nil) {
         // Hide current
         activeClaudeView?.isHidden = true
 
@@ -145,6 +163,9 @@ final class BuildView: NSView {
             cv = existing
         } else {
             cv = ClaudeTileView(frame: .zero, projectStore: projectStore)
+            if let prompt = initialPrompt {
+                cv.initialPrompt = prompt
+            }
             addSubview(cv)
             claudeViews[ideaID] = cv
 

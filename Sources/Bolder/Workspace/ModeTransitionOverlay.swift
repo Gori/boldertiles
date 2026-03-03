@@ -119,12 +119,12 @@ final class ModeTransitionOverlay: NSView {
 
     private func modeInfo(_ mode: ViewMode) -> (title: String, shortcut: String) {
         switch mode {
-        case .strip:
-            return ("STRIP", "⌘1")
-        case .build:
-            return ("BUILD", "⌘2")
         case .kanban:
-            return ("KANBAN", "⌘3")
+            return ("KANBAN", "⌘1")
+        case .strip:
+            return ("STRIP", "⌘2")
+        case .build:
+            return ("BUILD", "⌘3")
         }
     }
 }

@@ -12,6 +12,8 @@ final class KanbanColumnView: NSView {
 
     var onDropIdea: ((UUID, IdeaPhase) -> Void)?
     var onClickIdea: ((UUID) -> Void)?
+    var onDoubleClickIdea: ((UUID) -> Void)?
+    var onBuildIdea: ((UUID) -> Void)?
     private var cardViews: [IdeaCardView] = []
 
     init(phase: IdeaPhase) {
@@ -65,10 +67,8 @@ final class KanbanColumnView: NSView {
         stackView.orientation = .vertical
         stackView.alignment = .leading
         stackView.spacing = 8
-        stackView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Use a flipped container so content starts at the top
-        containerView.translatesAutoresizingMaskIntoConstraints = false
+        // Frame-based container — width is driven by layout(), not Auto Layout
         containerView.addSubview(stackView)
         scrollView.documentView = containerView
 
@@ -80,23 +80,19 @@ final class KanbanColumnView: NSView {
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
         ])
-
-        // Pin the stack view inside the flipped container
-        NSLayoutConstraint.activate([
-            stackView.topAnchor.constraint(equalTo: containerView.topAnchor),
-            stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-            stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
-            stackView.bottomAnchor.constraint(lessThanOrEqualTo: containerView.bottomAnchor),
-        ])
     }
 
     override func layout() {
         super.layout()
-        // Keep the container view's width matched to the clip view to prevent horizontal overflow
         let clipWidth = scrollView.contentView.bounds.width
-        if containerView.frame.width != clipWidth {
-            containerView.frame.size.width = clipWidth
-        }
+        containerView.frame.size.width = clipWidth
+        stackView.frame.origin = .zero
+        stackView.frame.size.width = clipWidth
+        // Let the stack view compute its fitting height, then size the container to match
+        stackView.layoutSubtreeIfNeeded()
+        let fittingHeight = stackView.fittingSize.height
+        stackView.frame.size.height = fittingHeight
+        containerView.frame.size.height = max(fittingHeight, scrollView.contentView.bounds.height)
     }
 
     func reload(ideas: [IdeaModel], noteContentLoader: (UUID) -> String?) {
@@ -109,11 +105,17 @@ final class KanbanColumnView: NSView {
         countLabel.stringValue = "\(ideas.count)"
 
         for idea in ideas {
-            let card = IdeaCardView(frame: NSRect(x: 0, y: 0, width: 200, height: 80))
+            let card = IdeaCardView(frame: .zero)
             card.translatesAutoresizingMaskIntoConstraints = false
             card.configure(idea: idea, notePreview: noteContentLoader(idea.id))
             card.onClick = { [weak self] id in
                 self?.onClickIdea?(id)
+            }
+            card.onDoubleClick = { [weak self] id in
+                self?.onDoubleClickIdea?(id)
+            }
+            card.onBuild = { [weak self] id in
+                self?.onBuildIdea?(id)
             }
 
             stackView.addArrangedSubview(card)
@@ -123,6 +125,30 @@ final class KanbanColumnView: NSView {
             ])
             cardViews.append(card)
         }
+        needsLayout = true
+    }
+
+    // MARK: - Card access for keyboard navigation
+
+    var cardCount: Int { cardViews.count }
+
+    func cardID(at index: Int) -> UUID? {
+        guard index >= 0, index < cardViews.count else { return nil }
+        return cardViews[index].ideaID
+    }
+
+    func setSelectedCard(at index: Int?) {
+        for (i, card) in cardViews.enumerated() {
+            card.setSelected(i == index)
+        }
+    }
+
+    func scrollToCard(at index: Int) {
+        guard index >= 0, index < cardViews.count else { return }
+        let card = cardViews[index]
+        // Convert card frame to container coordinates
+        let cardFrame = card.convert(card.bounds, to: containerView)
+        containerView.scrollToVisible(cardFrame)
     }
 
     private var phaseColor: NSColor {

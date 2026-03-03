@@ -396,7 +396,7 @@ final class StripView: NSView {
         projectStore.saveWorkspace(model)
     }
 
-    private func scrollToFocused() {
+    func scrollToFocused() {
         let target = StripLayout.snapOffset(
             forTileAt: model.focusedIndex,
             tiles: model.items,
@@ -527,7 +527,7 @@ final class StripView: NSView {
         switch idea.phase {
         case .note:  idea.phase = .plan
         case .plan:  idea.phase = .build
-        case .build: idea.phase = .done
+        case .build: idea.phase = .done; idea.buildStatus = .idle
         case .done:  return
         }
 

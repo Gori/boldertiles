@@ -56,6 +56,7 @@ final class WorkspaceView: NSView {
         switch mode {
         case .strip:
             stripView.isHidden = false
+            stripView.scrollToFocused()
             window?.makeFirstResponder(stripView)
             stripView.updateFirstResponder()
         case .build:
@@ -67,6 +68,8 @@ final class WorkspaceView: NSView {
             ensureKanbanView()
             kanbanView?.isHidden = false
             kanbanView?.reload()
+            kanbanView?.selectInitialCardIfNeeded()
+            window?.makeFirstResponder(kanbanView)
         }
 
         projectStore.saveWorkspace(model)
@@ -91,8 +94,22 @@ final class WorkspaceView: NSView {
         kv.onSwitchMode = { [weak self] mode in
             self?.switchMode(to: mode)
         }
+        kv.onBuildIdea = { [weak self] ideaID in
+            self?.triggerBuild(for: ideaID)
+        }
         addSubview(kv)
         self.kanbanView = kv
+    }
+
+    private func triggerBuild(for ideaID: UUID) {
+        let noteContent = projectStore.loadNoteContent(for: ideaID) ?? ""
+        let prompt = "Implement the following idea based on these notes:\n\n\(noteContent)"
+
+        model.selectedBuildIdeaID = ideaID
+
+        ensureBuildView()
+        switchMode(to: .build)
+        buildView?.selectIdeaWithPrompt(ideaID, prompt: prompt)
     }
 
     /// The inner strip view, for menu action routing.

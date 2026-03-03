@@ -10,6 +10,9 @@ final class ClaudeTileView: NSView, TileContentView {
     private let projectStore: ProjectStore
     private var tileID: UUID?
 
+    /// If set before `configure(with:)`, appended as the initial message for new sessions.
+    var initialPrompt: String?
+
     init(frame frameRect: NSRect, projectStore: ProjectStore) {
         self.projectStore = projectStore
         super.init(frame: frameRect)
@@ -56,12 +59,22 @@ final class ClaudeTileView: NSView, TileContentView {
                 command = "claude --resume \(sessionId)"
             } else {
                 // First launch — create session with this specific ID
-                command = "claude --session-id \(sessionId)"
+                if let prompt = initialPrompt {
+                    let escaped = prompt
+                        .replacingOccurrences(of: "\\", with: "\\\\")
+                        .replacingOccurrences(of: "\"", with: "\\\"")
+                        .replacingOccurrences(of: "$", with: "\\$")
+                        .replacingOccurrences(of: "`", with: "\\`")
+                    command = "claude --session-id \(sessionId) \"\(escaped)\""
+                } else {
+                    command = "claude --session-id \(sessionId)"
+                }
                 projectStore.saveTerminalMeta(
                     TerminalMeta(command: "claude", cwd: nil, environment: nil),
                     for: tile.id
                 )
             }
+            initialPrompt = nil
 
             surfaceView.createSurface(workingDirectory: nil, command: command)
         }

@@ -59,9 +59,9 @@ enum ShortcutAction: String, CaseIterable, Codable {
         .fontSizeUp:      KeyBinding(key: "=", command: true),
         .fontSizeDown:    KeyBinding(key: "-", command: true),
         .toggleMarination: KeyBinding(key: "m", command: true, shift: true),
-        .switchToStrip:   KeyBinding(key: "1", command: true),
-        .switchToBuild:   KeyBinding(key: "2", command: true),
-        .switchToKanban:  KeyBinding(key: "3", command: true),
+        .switchToKanban:  KeyBinding(key: "1", command: true),
+        .switchToStrip:   KeyBinding(key: "2", command: true),
+        .switchToBuild:   KeyBinding(key: "3", command: true),
         .advancePhase:    KeyBinding(key: "right", command: true, shift: true),
     ]
 }
