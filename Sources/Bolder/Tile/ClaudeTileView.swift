@@ -53,19 +53,22 @@ final class ClaudeTileView: NSView, TileContentView {
             TerminalSessionManager.shared.markActive(tile.id)
 
             let sessionId = tile.id.uuidString
-            let isNewSession = projectStore.loadTerminalMeta(for: tile.id) == nil
             let command: String
-            if isNewSession, let prompt = initialPrompt {
-                let escaped = prompt
-                    .replacingOccurrences(of: "\\", with: "\\\\")
-                    .replacingOccurrences(of: "\"", with: "\\\"")
-                    .replacingOccurrences(of: "$", with: "\\$")
-                    .replacingOccurrences(of: "`", with: "\\`")
-                command = "claude --session-id \(sessionId) \"\(escaped)\""
+
+            if let prompt = initialPrompt {
+                // Write prompt to temp file to avoid shell escaping issues
+                // with newlines, quotes, etc. in note content.
+                let tempPath = NSTemporaryDirectory() + "bolder-build-\(sessionId).txt"
+                try? prompt.write(toFile: tempPath, atomically: true, encoding: .utf8)
+                command = "claude --session-id \(sessionId) \"$(cat '\(tempPath)')\""
+                NSLog("[ClaudeTileView] starting build session \(sessionId) with prompt (\(prompt.count) chars)")
             } else {
                 command = "claude --session-id \(sessionId)"
+                NSLog("[ClaudeTileView] resuming session \(sessionId)")
             }
-            if isNewSession {
+
+            // Track that we've launched a session for this idea
+            if projectStore.loadTerminalMeta(for: tile.id) == nil {
                 projectStore.saveTerminalMeta(
                     TerminalMeta(command: "claude", cwd: nil, environment: nil),
                     for: tile.id

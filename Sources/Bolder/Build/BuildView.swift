@@ -224,15 +224,20 @@ final class BuildView: NSView {
         let cv: ClaudeTileView
         if let existing = claudeViews[ideaID] {
             cv = existing
+            NSLog("[BuildView] showClaudeView: reusing cached view for \(ideaID), isConfigured=\(cv.isConfigured)")
         } else {
             cv = ClaudeTileView(frame: .zero, projectStore: projectStore)
             addSubview(cv)
             claudeViews[ideaID] = cv
+            NSLog("[BuildView] showClaudeView: created new view for \(ideaID)")
         }
 
         // Configure the surface if not yet started and we have a reason to start
         if !cv.isConfigured, let idea = model.idea(for: ideaID) {
-            if initialPrompt != nil || idea.buildStatus == .building {
+            let hasPrompt = initialPrompt != nil
+            let isBuilding = idea.buildStatus == .building
+            NSLog("[BuildView] showClaudeView: not configured, hasPrompt=\(hasPrompt), isBuilding=\(isBuilding)")
+            if hasPrompt || isBuilding {
                 if let prompt = initialPrompt {
                     cv.initialPrompt = prompt
                 }

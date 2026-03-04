@@ -1,5 +1,8 @@
 .DS_Store
 .build/
+temp_auto_push.bat
 .bolder/
 Frameworks/
 node_modules/
+.gitignore
+temp_interactive_push.bat
