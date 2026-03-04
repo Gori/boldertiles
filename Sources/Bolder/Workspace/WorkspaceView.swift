@@ -108,6 +108,8 @@ final class WorkspaceView: NSView {
         let noteContent = projectStore.loadNoteContent(for: ideaID) ?? ""
         let prompt = "Implement the following idea based on these notes:\n\n\(noteContent)"
 
+        NSLog("[WorkspaceView] triggerBuild for \(ideaID), noteContent=\(noteContent.count) chars")
+
         model.selectedBuildIdeaID = ideaID
         model.mutateIdea(ideaID) { $0.buildStatus = .building }
         projectStore.saveWorkspace(model)
