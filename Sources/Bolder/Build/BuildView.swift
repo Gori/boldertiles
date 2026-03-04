@@ -169,10 +169,11 @@ final class BuildView: NSView {
             claudeViews[ideaID] = cv
         }
 
-        // Configure the surface if not yet started and we have a reason to start
+        // Configure the surface if not yet started and we have a reason to start:
+        // - explicit build prompt (user triggered Cmd+B or ▶ button)
+        // - idea was actively building (app restart resumes the session)
         if !cv.isConfigured, let idea = model.idea(for: ideaID) {
-            let hasPriorSession = projectStore.loadTerminalMeta(for: idea.id) != nil
-            if hasPriorSession || initialPrompt != nil {
+            if initialPrompt != nil || idea.buildStatus == .building {
                 if let prompt = initialPrompt {
                     cv.initialPrompt = prompt
                 }

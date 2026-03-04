@@ -77,11 +77,19 @@ final class IdeaCardView: NSView, NSDraggingSource {
     }
 
     private func setupBuildButton() {
-        buildButton.title = "\u{25B6}" // ▶
+        let greenColor = NSColor(red: 0.3, green: 0.9, blue: 0.5, alpha: 1.0)
+        buildButton.attributedTitle = NSAttributedString(
+            string: "\u{25B6}",
+            attributes: [
+                .foregroundColor: greenColor,
+                .font: NSFont.systemFont(ofSize: 12, weight: .bold),
+            ]
+        )
         buildButton.bezelStyle = .inline
         buildButton.isBordered = false
-        buildButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        buildButton.contentTintColor = NSColor(red: 0.3, green: 0.9, blue: 0.5, alpha: 1.0)
+        buildButton.wantsLayer = true
+        buildButton.layer?.cornerRadius = 4
+        buildButton.layer?.backgroundColor = CGColor(red: 0.3, green: 0.9, blue: 0.5, alpha: 0.15)
         buildButton.translatesAutoresizingMaskIntoConstraints = false
         buildButton.target = self
         buildButton.action = #selector(buildButtonClicked)
@@ -91,8 +99,8 @@ final class IdeaCardView: NSView, NSDraggingSource {
         NSLayoutConstraint.activate([
             buildButton.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             buildButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            buildButton.widthAnchor.constraint(equalToConstant: 22),
-            buildButton.heightAnchor.constraint(equalToConstant: 22),
+            buildButton.widthAnchor.constraint(equalToConstant: 24),
+            buildButton.heightAnchor.constraint(equalToConstant: 24),
         ])
     }
 
