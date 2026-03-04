@@ -23,6 +23,8 @@ final class BuildView: NSView {
 
     /// Callback for mode-switch requests (handled by WorkspaceView).
     var onSwitchMode: ((ViewMode) -> Void)?
+    /// Callback to trigger a build for the given idea (loads notes, composes prompt).
+    var onBuildIdea: ((UUID) -> Void)?
 
     init(frame frameRect: NSRect, model: WorkspaceModel, projectStore: ProjectStore) {
         self.model = model
@@ -215,6 +217,16 @@ final class BuildView: NSView {
         needsLayout = true
     }
 
+    // MARK: - Build trigger
+
+    private func startBuild(for ideaID: UUID) {
+        // Already has a session running — nothing to do
+        if let cv = claudeViews[ideaID], cv.isConfigured {
+            return
+        }
+        onBuildIdea?(ideaID)
+    }
+
     // MARK: - Toggle note panel
 
     func toggleNotePanel() {
@@ -232,6 +244,15 @@ final class BuildView: NSView {
         if event.modifierFlags.contains(.command),
            event.charactersIgnoringModifiers == "." {
             toggleNotePanel()
+            return true
+        }
+
+        // Cmd+B starts build for the selected idea
+        if event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers == "b" {
+            if let id = model.selectedBuildIdeaID {
+                startBuild(for: id)
+            }
             return true
         }
 

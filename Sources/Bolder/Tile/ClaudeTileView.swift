@@ -97,6 +97,9 @@ final class ClaudeTileView: NSView, TileContentView {
         _ = ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
     }
 
+    /// Whether the Claude CLI surface has been created (session is running or was started).
+    var isConfigured: Bool { surfaceView.surface != nil }
+
     /// The inner surface view, for first-responder routing.
     var innerSurfaceView: TerminalSurfaceView { surfaceView }
 }

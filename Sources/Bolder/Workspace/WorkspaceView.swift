@@ -83,6 +83,9 @@ final class WorkspaceView: NSView {
         bv.onSwitchMode = { [weak self] mode in
             self?.switchMode(to: mode)
         }
+        bv.onBuildIdea = { [weak self] ideaID in
+            self?.triggerBuild(for: ideaID)
+        }
         addSubview(bv)
         self.buildView = bv
     }
@@ -106,12 +109,19 @@ final class WorkspaceView: NSView {
         let prompt = "Implement the following idea based on these notes:\n\n\(noteContent)"
 
         model.selectedBuildIdeaID = ideaID
+        model.mutateIdea(ideaID) { $0.buildStatus = .building }
+        projectStore.saveWorkspace(model)
 
         // Create the claude view with prompt BEFORE switchMode,
         // since switchMode → reload() would create it without the prompt.
         ensureBuildView()
         buildView?.selectIdeaWithPrompt(ideaID, prompt: prompt)
-        switchMode(to: .build)
+
+        if model.viewMode != .build {
+            switchMode(to: .build)
+        } else {
+            buildView?.makeClaudeFirstResponder(in: window)
+        }
     }
 
     /// The inner strip view, for menu action routing.

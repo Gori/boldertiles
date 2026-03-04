@@ -195,9 +195,7 @@ final class KanbanView: NSView {
 
     private func buildIdea(_ ideaID: UUID) {
         guard let idea = model.idea(for: ideaID), idea.phase == .build else { return }
-        model.mutateIdea(ideaID) { $0.buildStatus = .building }
-        projectStore.saveWorkspace(model)
-        reload()
+        // triggerBuild (via onBuildIdea) handles buildStatus, prompt, and mode switch
         onBuildIdea?(ideaID)
     }
 
