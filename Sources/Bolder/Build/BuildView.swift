@@ -13,6 +13,10 @@ final class BuildView: NSView {
     private var claudeViews: [UUID: ClaudeTileView] = [:]
     private var activeClaudeView: ClaudeTileView?
 
+    // Center: placeholder shown when Claude hasn't been started
+    private let startBuildPlaceholder = NSView()
+    private let startBuildButton = NSButton()
+
     // Right: collapsible note panel
     private var notePanel: NotesTileView?
     private var notePanelVisible = true
@@ -37,6 +41,7 @@ final class BuildView: NSView {
 
         setupSidebar()
         setupDividers()
+        setupStartBuildPlaceholder()
 
         sidebar.onSelectIdea = { [weak self] id in
             self?.selectIdea(id)
@@ -67,6 +72,60 @@ final class BuildView: NSView {
         layer?.addSublayer(dividerRight)
     }
 
+    private func setupStartBuildPlaceholder() {
+        startBuildPlaceholder.wantsLayer = true
+        startBuildPlaceholder.isHidden = true
+        addSubview(startBuildPlaceholder)
+
+        let label = NSTextField(labelWithString: "Ready to build")
+        label.font = NSFont.systemFont(ofSize: 16, weight: .medium)
+        label.textColor = NSColor.white.withAlphaComponent(0.4)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        startBuildPlaceholder.addSubview(label)
+
+        let shortcutLabel = NSTextField(labelWithString: "\u{2318}B to start")
+        shortcutLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+        shortcutLabel.textColor = NSColor.white.withAlphaComponent(0.25)
+        shortcutLabel.translatesAutoresizingMaskIntoConstraints = false
+        startBuildPlaceholder.addSubview(shortcutLabel)
+
+        let greenColor = NSColor(red: 0.3, green: 0.9, blue: 0.5, alpha: 1.0)
+        startBuildButton.attributedTitle = NSAttributedString(
+            string: "\u{25B6}  Start Build",
+            attributes: [
+                .foregroundColor: greenColor,
+                .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+            ]
+        )
+        startBuildButton.bezelStyle = .rounded
+        startBuildButton.isBordered = false
+        startBuildButton.wantsLayer = true
+        startBuildButton.layer?.cornerRadius = 8
+        startBuildButton.layer?.backgroundColor = CGColor(red: 0.3, green: 0.9, blue: 0.5, alpha: 0.12)
+        startBuildButton.translatesAutoresizingMaskIntoConstraints = false
+        startBuildButton.target = self
+        startBuildButton.action = #selector(startBuildClicked)
+        startBuildPlaceholder.addSubview(startBuildButton)
+
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: startBuildPlaceholder.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: startBuildPlaceholder.centerYAnchor, constant: -40),
+
+            startBuildButton.centerXAnchor.constraint(equalTo: startBuildPlaceholder.centerXAnchor),
+            startBuildButton.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 16),
+            startBuildButton.widthAnchor.constraint(equalToConstant: 160),
+            startBuildButton.heightAnchor.constraint(equalToConstant: 40),
+
+            shortcutLabel.centerXAnchor.constraint(equalTo: startBuildPlaceholder.centerXAnchor),
+            shortcutLabel.topAnchor.constraint(equalTo: startBuildButton.bottomAnchor, constant: 12),
+        ])
+    }
+
+    @objc private func startBuildClicked() {
+        guard let id = model.selectedBuildIdeaID else { return }
+        onBuildIdea?(id)
+    }
+
     // MARK: - Layout
 
     override func layout() {
@@ -81,7 +140,9 @@ final class BuildView: NSView {
         // Center area
         let centerX = sidebarWidth + dividerWidth
         let centerW = max(0, bounds.width - sidebarWidth - dividerWidth - notePanelW - (notePanelVisible ? dividerWidth : 0))
-        activeClaudeView?.frame = CGRect(x: centerX, y: 0, width: centerW, height: h)
+        let centerFrame = CGRect(x: centerX, y: 0, width: centerW, height: h)
+        activeClaudeView?.frame = centerFrame
+        startBuildPlaceholder.frame = centerFrame
 
         // Divider right of center (before note panel)
         if notePanelVisible {
@@ -169,9 +230,7 @@ final class BuildView: NSView {
             claudeViews[ideaID] = cv
         }
 
-        // Configure the surface if not yet started and we have a reason to start:
-        // - explicit build prompt (user triggered Cmd+B or ▶ button)
-        // - idea was actively building (app restart resumes the session)
+        // Configure the surface if not yet started and we have a reason to start
         if !cv.isConfigured, let idea = model.idea(for: ideaID) {
             if initialPrompt != nil || idea.buildStatus == .building {
                 if let prompt = initialPrompt {
@@ -187,7 +246,15 @@ final class BuildView: NSView {
             }
         }
 
-        cv.isHidden = false
+        // Show either the running terminal or the "Start Build" placeholder
+        if cv.isConfigured {
+            cv.isHidden = false
+            startBuildPlaceholder.isHidden = true
+        } else {
+            cv.isHidden = true
+            startBuildPlaceholder.isHidden = false
+        }
+
         activeClaudeView = cv
         needsLayout = true
     }
@@ -217,16 +284,6 @@ final class BuildView: NSView {
         needsLayout = true
     }
 
-    // MARK: - Build trigger
-
-    private func startBuild(for ideaID: UUID) {
-        // Already has a session running — nothing to do
-        if let cv = claudeViews[ideaID], cv.isConfigured {
-            return
-        }
-        onBuildIdea?(ideaID)
-    }
-
     // MARK: - Toggle note panel
 
     func toggleNotePanel() {
@@ -251,7 +308,7 @@ final class BuildView: NSView {
         if event.modifierFlags.contains(.command),
            event.charactersIgnoringModifiers == "b" {
             if let id = model.selectedBuildIdeaID {
-                startBuild(for: id)
+                onBuildIdea?(id)
             }
             return true
         }
@@ -274,7 +331,7 @@ final class BuildView: NSView {
     // MARK: - First responder
 
     func makeClaudeFirstResponder(in window: NSWindow?) {
-        if let cv = activeClaudeView {
+        if let cv = activeClaudeView, cv.isConfigured {
             window?.makeFirstResponder(cv.innerSurfaceView)
         }
     }

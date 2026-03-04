@@ -39,6 +39,14 @@ final class BolderAppDelegate: NSObject, NSApplicationDelegate {
             self.workspaceModel = WorkspaceModel.defaultModel()
         }
 
+        // Reset stale buildStatus — no terminals are running at app start
+        for i in workspaceModel.items.indices {
+            if case .idea(var idea) = workspaceModel.items[i], idea.buildStatus == .building {
+                idea.buildStatus = .idle
+                workspaceModel.items[i] = .idea(idea)
+            }
+        }
+
         // Create marination engine
         let engine = MarinationEngine(storage: store, projectURL: projectURL)
         self.marinationEngine = engine
